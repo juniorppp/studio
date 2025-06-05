@@ -21,7 +21,8 @@ export interface Bill {
 export interface StoredBillData {
   id: string;
   amount: number;
-  name?: string;
+  name?: string; // Used if isCustom is true
+  nameKey?: string; // Used if !isCustom to find translated name
   isCustom?: boolean;
   incomeSourceId?: string;
 }
@@ -34,6 +35,7 @@ export interface IncomeSource {
 
 // Represents data for a specific month and year
 export interface MonthlyData {
+  _id?: string; // MongoDB ObjectId as string
   year: number;
   month: number; // 1 for January, 12 for December
   incomeSources: IncomeSource[];
@@ -42,9 +44,11 @@ export interface MonthlyData {
 
 export type Locale = 'en' | 'pt';
 
+// AppStorage now primarily handles user settings stored in localStorage.
+// Monthly financial data is managed via MongoDB.
 export interface AppStorage {
   userLocale: Locale;
   defaultIncome?: number;
-  defaultIncomeSourceName?: string; // New: Custom name for the default/primary income source
-  allMonthlyData: MonthlyData[];
+  defaultIncomeSourceName?: string;
+  // allMonthlyData: MonthlyData[]; // This is now removed and handled by MongoDB
 }
