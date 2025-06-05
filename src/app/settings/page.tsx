@@ -39,6 +39,7 @@ export default function SettingsPage() {
           setCurrentLanguage(parsedAppStorage.userLocale);
         }
       } else {
+        // If no stored data, defaultIncome remains 0, format that for display
         setLocalDefaultIncomeDisplay(formatCurrency(0));
       }
     } catch (error) {
@@ -48,11 +49,14 @@ export default function SettingsPage() {
         title: t('toast.errorLoadingSettings.title'),
         description: t('toast.errorLoadingSettings.description'),
       });
+      // In case of error, defaultIncome remains 0, format that for display
       setLocalDefaultIncomeDisplay(formatCurrency(0));
     }
   }, [toast, t, formatCurrency, getLocale]); 
 
   useEffect(() => {
+    // This effect syncs display when locale (and thus currency format) changes,
+    // or if defaultIncome was updated programmatically (though less common in this component)
     setLocalDefaultIncomeDisplay(formatCurrency(defaultIncome));
     setCurrentLanguage(getLocale()); 
   }, [locale, defaultIncome, formatCurrency, getLocale]);
@@ -64,8 +68,8 @@ export default function SettingsPage() {
 
   const handleDefaultIncomeInputBlur = () => {
     const numericValue = parseCurrency(localDefaultIncomeDisplay);
-    setDefaultIncome(numericValue);
-    setLocalDefaultIncomeDisplay(formatCurrency(numericValue)); 
+    setDefaultIncome(numericValue); // Update the state
+    setLocalDefaultIncomeDisplay(formatCurrency(numericValue)); // Re-format for display
   };
 
   const handleLanguageChange = (value: string) => {
@@ -79,9 +83,10 @@ export default function SettingsPage() {
   const handleSaveChanges = useCallback(() => {
     if (!isClient) return;
     try {
+      // Ensure defaultIncome state is up-to-date from localDefaultIncomeDisplay
       const numericDefaultIncome = parseCurrency(localDefaultIncomeDisplay);
       setDefaultIncome(numericDefaultIncome); 
-      setLocalDefaultIncomeDisplay(formatCurrency(numericDefaultIncome));
+      // No need to setLocalDefaultIncomeDisplay here again, blur or input change already did.
 
       const storedDataString = localStorage.getItem(LOCAL_STORAGE_KEY);
       let currentAppStorage: AppStorage;
@@ -89,15 +94,16 @@ export default function SettingsPage() {
       if (storedDataString) {
         currentAppStorage = JSON.parse(storedDataString);
       } else {
+        // Initialize a new AppStorage if none exists
         currentAppStorage = {
-          userLocale: getLocale(),
+          userLocale: getLocale(), // current language
           defaultIncome: numericDefaultIncome,
-          allMonthlyData: [],
+          allMonthlyData: [], // Ensure allMonthlyData is an empty array
         };
       }
       
       currentAppStorage.defaultIncome = numericDefaultIncome;
-      currentAppStorage.userLocale = getLocale(); 
+      currentAppStorage.userLocale = getLocale(); // Ensure current language is saved
 
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(currentAppStorage));
       toast({
@@ -112,7 +118,7 @@ export default function SettingsPage() {
         description: t('toast.errorSavingSettings.description'),
       });
     }
-  }, [isClient, toast, t, getLocale, parseCurrency, formatCurrency, localDefaultIncomeDisplay, setGlobalLocale]);
+  }, [isClient, toast, t, getLocale, parseCurrency, formatCurrency, localDefaultIncomeDisplay, setGlobalLocale]); // Added formatCurrency for consistency if parseCurrency changes it significantly
 
   if (!isClient) {
     return (
@@ -151,7 +157,7 @@ export default function SettingsPage() {
               value={localDefaultIncomeDisplay}
               onChange={handleDefaultIncomeInputChange}
               onBlur={handleDefaultIncomeInputBlur}
-              placeholder={t('currency.placeholder', { exampleAmount: formatCurrency(appStorage?.defaultIncome || 3000)})}
+              placeholder={t('currency.placeholder', { exampleAmount: formatCurrency(defaultIncome || 0)})}
               className="mt-1 text-lg"
               aria-label={t('settings.defaultIncomeCard.label')}
             />
