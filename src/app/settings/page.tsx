@@ -26,7 +26,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     setIsClient(true);
-    setCurrentLanguage(getLocale()); // Initialize with current global locale
+    setCurrentLanguage(getLocale()); 
     try {
       const storedDataString = localStorage.getItem(LOCAL_STORAGE_KEY);
       if (storedDataString) {
@@ -35,7 +35,6 @@ export default function SettingsPage() {
         setDefaultIncome(loadedDefaultIncome);
         setLocalDefaultIncomeDisplay(formatCurrency(loadedDefaultIncome));
         
-        // Language is already handled by LocalizationProvider, but we sync currentLanguage state
         if (parsedAppStorage.userLocale && (parsedAppStorage.userLocale === 'en' || parsedAppStorage.userLocale === 'pt')) {
           setCurrentLanguage(parsedAppStorage.userLocale);
         }
@@ -51,12 +50,11 @@ export default function SettingsPage() {
       });
       setLocalDefaultIncomeDisplay(formatCurrency(0));
     }
-  }, [toast, t, formatCurrency, getLocale]); // getLocale is stable
+  }, [toast, t, formatCurrency, getLocale]); 
 
   useEffect(() => {
-    // Update display when locale changes (e.g. currency format) or defaultIncome changes
     setLocalDefaultIncomeDisplay(formatCurrency(defaultIncome));
-    setCurrentLanguage(getLocale()); // Keep currentLanguage state synced with global locale
+    setCurrentLanguage(getLocale()); 
   }, [locale, defaultIncome, formatCurrency, getLocale]);
 
 
@@ -73,9 +71,8 @@ export default function SettingsPage() {
   const handleLanguageChange = (value: string) => {
     if (value === 'en' || value === 'pt') {
       const newLocale = value as Locale;
-      setGlobalLocale(newLocale); // Update global locale via context
-      setCurrentLanguage(newLocale); // Update local state for the Select component
-      // Toast is now handled by setGlobalLocale in LocalizationContext if it shows one
+      setGlobalLocale(newLocale); 
+      setCurrentLanguage(newLocale); 
     }
   };
 
@@ -83,7 +80,6 @@ export default function SettingsPage() {
     if (!isClient) return;
     try {
       const numericDefaultIncome = parseCurrency(localDefaultIncomeDisplay);
-      // We update defaultIncome state here to ensure it's numeric before saving
       setDefaultIncome(numericDefaultIncome); 
       setLocalDefaultIncomeDisplay(formatCurrency(numericDefaultIncome));
 
@@ -93,7 +89,6 @@ export default function SettingsPage() {
       if (storedDataString) {
         currentAppStorage = JSON.parse(storedDataString);
       } else {
-        // Initialize if somehow not present
         currentAppStorage = {
           userLocale: getLocale(),
           defaultIncome: numericDefaultIncome,
@@ -102,7 +97,7 @@ export default function SettingsPage() {
       }
       
       currentAppStorage.defaultIncome = numericDefaultIncome;
-      currentAppStorage.userLocale = getLocale(); // Use the globally set locale
+      currentAppStorage.userLocale = getLocale(); 
 
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(currentAppStorage));
       toast({
@@ -156,7 +151,7 @@ export default function SettingsPage() {
               value={localDefaultIncomeDisplay}
               onChange={handleDefaultIncomeInputChange}
               onBlur={handleDefaultIncomeInputBlur}
-              placeholder={t('currency.placeholder', { exampleAmount: formatCurrency(3000)})}
+              placeholder={t('currency.placeholder', { exampleAmount: formatCurrency(appStorage?.defaultIncome || 3000)})}
               className="mt-1 text-lg"
               aria-label={t('settings.defaultIncomeCard.label')}
             />

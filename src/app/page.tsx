@@ -10,18 +10,19 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { PieChart as ChartIcon, Droplet, Zap, Wifi, Home, DollarSign, LineChart, AlertCircle, Loader2, Brain, Settings as SettingsIcon, Receipt, PlusCircle, CalendarDays } from 'lucide-react';
-import { BarChart, Pie, PieChart, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { PieChart as ChartIcon, Droplet, Zap, Wifi, Home, DollarSign, LineChart, AlertCircle, Loader2, Brain, Settings as SettingsIcon, Receipt, PlusCircle, CalendarDays, Edit3, Trash2, Landmark } from 'lucide-react';
+import { Pie, PieChart, Cell, Legend, ResponsiveContainer } from 'recharts';
 import { ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from "@/components/ui/chart";
-import type { Bill, BillConfig, StoredBillData, MonthlyData, AppStorage, Locale } from '@/types';
+import type { Bill, BillConfig, StoredBillData, MonthlyData, AppStorage, Locale, IncomeSource } from '@/types';
 import { getSpendingInsights } from '@/ai/flows/spending-insights';
 import type { SpendingInsightsInput, SpendingInsightsOutput } from '@/ai/flows/spending-insights';
 import { siteConfig } from '@/config/site';
 import { useToast } from "@/hooks/use-toast";
 import { useLocalization } from '@/hooks/use-localization';
-import { format, getYear, getMonth, subYears, addYears } from 'date-fns';
+import { format, getYear, getMonth } from 'date-fns';
 import { enUS, ptBR } from 'date-fns/locale';
 
 
@@ -62,13 +63,11 @@ export default function HomePage() {
   const [appStorage, setAppStorage] = useState<AppStorage | null>(null);
 
   const [selectedYear, setSelectedYear] = useState<number>(getYear(new Date()));
-  const [selectedMonth, setSelectedMonth] = useState<number>(getMonth(new Date()) + 1); // 1-12
+  const [selectedMonth, setSelectedMonth] = useState<number>(getMonth(new Date()) + 1); 
 
   const [currentMonthlyData, setCurrentMonthlyData] = useState<MonthlyData | null>(null);
   
-  // Derived state for UI: income and bills for the selected period
-  const [income, setIncome] = useState<number>(0);
-  const [localIncomeDisplay, setLocalIncomeDisplay] = useState('');
+  const [incomeSources, setIncomeSources] = useState<IncomeSource[]>([]);
   const [bills, setBills] = useState<Bill[]>([]);
 
   const [insights, setInsights] = useState<string | null>(null);
@@ -78,31 +77,39 @@ export default function HomePage() {
   const [isAddBillModalOpen, setIsAddBillModalOpen] = useState(false);
   const [newBillName, setNewBillName] = useState('');
   const [newBillAmount, setNewBillAmount] = useState('');
+  const [selectedIncomeSourceForNewBill, setSelectedIncomeSourceForNewBill] = useState<string | undefined>(undefined);
+
+  const [isIncomeSourceModalOpen, setIsIncomeSourceModalOpen] = useState(false);
+  const [currentIncomeSource, setCurrentIncomeSource] = useState<IncomeSource | null>(null); // For editing
+  const [incomeSourceName, setIncomeSourceName] = useState('');
+  const [incomeSourceAmount, setIncomeSourceAmount] = useState('');
   
   const yearOptions = useMemo(() => generateYearOptions(), []);
   const monthOptions = useMemo(() => generateMonthOptions(t, locale), [t, locale]);
 
 
-  const mapStoredDataToBills = useCallback((storedBills: StoredBillData[]): Bill[] => {
+  const mapStoredDataToBills = useCallback((storedBills: StoredBillData[], currentIncomeSources: IncomeSource[]): Bill[] => {
     return storedBills.map(storedBill => {
+      const baseBill = {
+        id: storedBill.id,
+        amount: storedBill.amount || 0,
+        isCustom: storedBill.isCustom,
+        incomeSourceId: storedBill.incomeSourceId,
+      };
       if (storedBill.isCustom) {
         return {
-          id: storedBill.id,
+          ...baseBill,
           name: storedBill.name || t('home.bills.customBillFallback'),
           icon: Receipt,
-          amount: storedBill.amount || 0,
-          isCustom: true,
         };
       }
       const config = PREDEFINED_BILLS_CONFIG.find(pb => pb.id === storedBill.id);
       if (config) {
         return {
-          id: config.id,
+          ...baseBill,
           name: t(config.nameKey) || config.defaultName,
           nameKey: config.nameKey,
           icon: config.icon,
-          amount: storedBill.amount || 0,
-          isCustom: false,
         };
       }
       return null; 
@@ -131,7 +138,6 @@ export default function HomePage() {
         };
         setAppStorage(validatedAppStorage);
       } else {
-        // Initialize AppStorage if nothing is in localStorage
         const initialStorage: AppStorage = {
           userLocale: getLocale(),
           defaultIncome: 0,
@@ -154,31 +160,32 @@ export default function HomePage() {
   
   // Effect to load/initialize data for the selectedYear and selectedMonth
   useEffect(() => {
-    if (!isClient || !appStorage) return; // appStorage.allMonthlyData is guaranteed to be an array if appStorage is truthy
+    if (!isClient || !appStorage) return;
 
     let monthData = appStorage.allMonthlyData.find(
       (data) => data.year === selectedYear && data.month === selectedMonth
     );
 
     if (!monthData) {
-      // Create new monthly data if it doesn't exist
       monthData = {
         year: selectedYear,
         month: selectedMonth,
-        income: appStorage.defaultIncome || 0,
+        incomeSources: [{ 
+            id: `primary-${Date.now()}`, 
+            name: t('home.incomeSources.defaultPrimaryName'), 
+            amount: appStorage.defaultIncome || 0 
+        }],
         bills: initializePredefinedBills(),
       };
-      // No need to push to appStorage here, will be handled by save logic
     }
     
     setCurrentMonthlyData(monthData);
-    setIncome(monthData.income);
-    setLocalIncomeDisplay(formatCurrency(monthData.income));
-    setBills(mapStoredDataToBills(monthData.bills));
-    setInsights(null); // Clear insights when period changes
+    setIncomeSources(monthData.incomeSources || []);
+    setBills(mapStoredDataToBills(monthData.bills, monthData.incomeSources || []));
+    setInsights(null); 
     setErrorInsights(null);
 
-  }, [isClient, appStorage, selectedYear, selectedMonth, initializePredefinedBills, mapStoredDataToBills, formatCurrency]);
+  }, [isClient, appStorage, selectedYear, selectedMonth, initializePredefinedBills, mapStoredDataToBills, t]);
 
   // Effect to save data to localStorage when currentMonthlyData changes
   useEffect(() => {
@@ -192,7 +199,7 @@ export default function HomePage() {
     const newAppStorage: AppStorage = {
       ...appStorage,
       allMonthlyData: updatedAllMonthlyData,
-      userLocale: getLocale(), // Ensure locale is up-to-date
+      userLocale: getLocale(), 
     };
     
     setAppStorage(newAppStorage); 
@@ -200,14 +207,13 @@ export default function HomePage() {
 
   }, [currentMonthlyData, isClient, getLocale]); 
 
-  // Update currentMonthlyData when income state changes
-  useEffect(() => {
-    if (currentMonthlyData && currentMonthlyData.income !== income) {
-      setCurrentMonthlyData(prev => prev ? { ...prev, income } : null);
-    }
-  }, [income, currentMonthlyData]); 
 
-  // Update currentMonthlyData when bills state changes
+  useEffect(() => {
+    if (currentMonthlyData && JSON.stringify(currentMonthlyData.incomeSources) !== JSON.stringify(incomeSources)) {
+      setCurrentMonthlyData(prev => prev ? { ...prev, incomeSources } : null);
+    }
+  }, [incomeSources, currentMonthlyData]); 
+
   useEffect(() => {
     if (currentMonthlyData) {
         const storedBillsData: StoredBillData[] = bills.map(bill => ({
@@ -215,6 +221,7 @@ export default function HomePage() {
           amount: bill.amount,
           name: bill.isCustom ? bill.name : undefined,
           isCustom: bill.isCustom,
+          incomeSourceId: bill.incomeSourceId,
         }));
         
         if (JSON.stringify(currentMonthlyData.bills) !== JSON.stringify(storedBillsData)) {
@@ -223,30 +230,15 @@ export default function HomePage() {
     }
   }, [bills, currentMonthlyData]); 
 
-
-  // Update bill names and income display if locale changes (or initial load)
    useEffect(() => {
     if (isClient) {
         setBills(currentBills => currentBills.map(bill => ({
           ...bill,
           name: bill.isCustom ? bill.name : (t(bill.nameKey || '') || PREDEFINED_BILLS_CONFIG.find(pb => pb.id === bill.id)?.defaultName || t('home.bills.customBillFallback'))
         })));
-        setLocalIncomeDisplay(formatCurrency(income)); 
-        
     }
-  }, [t, locale, isClient, formatCurrency, income]);
+  }, [t, locale, isClient]);
 
-
-  const handleIncomeInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setLocalIncomeDisplay(event.target.value);
-  };
-
-  const handleIncomeInputBlur = () => {
-    const numericValue = parseCurrency(localIncomeDisplay);
-    setIncome(numericValue); 
-    setLocalIncomeDisplay(formatCurrency(numericValue));
-  };
-  
   const handleBillAmountDisplayChange = (billId: string, displayValue: string) => {
     setBills(prevBills =>
       prevBills.map(bill =>
@@ -254,26 +246,32 @@ export default function HomePage() {
       )
     );
   };
-
-  const handleBillAmountInputBlur = (billId: string, displayValue: string) => {
-    const billToUpdate = bills.find(b => b.id === billId);
-    // No explicit re-render trigger needed here, value prop of Input handles it
+  
+  const handleBillIncomeSourceChange = (billId: string, sourceId: string) => {
+    setBills(prevBills =>
+      prevBills.map(bill =>
+        bill.id === billId ? { ...bill, incomeSourceId: sourceId === "unassigned" ? undefined : sourceId } : bill
+      )
+    );
   };
-
+  
+  const totalIncome = useMemo(() => {
+    return incomeSources.reduce((total, source) => total + (source.amount || 0), 0);
+  }, [incomeSources]);
 
   const totalExpenses = useMemo(() => {
     return bills.reduce((total, bill) => total + (bill.amount || 0), 0);
   }, [bills]);
 
   const remainingBalance = useMemo(() => {
-    return income - totalExpenses;
-  }, [income, totalExpenses]);
+    return totalIncome - totalExpenses;
+  }, [totalIncome, totalExpenses]);
 
   const expenseRatio = useMemo(() => {
-    if (income === 0 && totalExpenses === 0) return 0; 
-    if (income === 0) return totalExpenses > 0 ? 1000 : 0; 
-    return Math.min(Math.max(0, (totalExpenses / income) * 100), 1000); 
-  }, [income, totalExpenses]);
+    if (totalIncome === 0 && totalExpenses === 0) return 0; 
+    if (totalIncome === 0) return totalExpenses > 0 ? 1000 : 0; 
+    return Math.min(Math.max(0, (totalExpenses / totalIncome) * 100), 1000); 
+  }, [totalIncome, totalExpenses]);
 
   const handleGenerateInsights = useCallback(async () => {
     if (!currentMonthlyData) return;
@@ -284,12 +282,20 @@ export default function HomePage() {
     const currentLocale = getLocale();
     const languageForAI = currentLocale === 'pt' ? 'Portuguese' : 'English';
 
+    const totalIncomeForAI = currentMonthlyData.incomeSources.reduce((sum, source) => sum + source.amount, 0);
+
     const insightInput: SpendingInsightsInput = {
-      income: currentMonthlyData.income,
+      incomeSources: currentMonthlyData.incomeSources.map(s => ({name: s.name, amount: s.amount })),
+      totalIncome: totalIncomeForAI,
       expenses: currentMonthlyData.bills.map(b => {
           const billConfig = PREDEFINED_BILLS_CONFIG.find(pbc => pbc.id === b.id);
           const name = b.isCustom ? b.name : (billConfig ? t(billConfig.nameKey) : t('home.bills.customBillFallback'));
-          return { category: name || t('home.bills.unknownCategory'), amount: b.amount };
+          const paidBySource = currentMonthlyData.incomeSources.find(src => src.id === b.incomeSourceId);
+          return { 
+            category: name || t('home.bills.unknownCategory'), 
+            amount: b.amount,
+            paidBy: paidBySource?.name 
+          };
       }),
       language: languageForAI,
     };
@@ -328,13 +334,64 @@ export default function HomePage() {
       icon: Receipt,
       amount: parsedAmount,
       isCustom: true,
+      incomeSourceId: selectedIncomeSourceForNewBill === "unassigned" ? undefined : selectedIncomeSourceForNewBill,
     };
     setBills(prevBills => [...prevBills, newBill]); 
     setNewBillName('');
     setNewBillAmount('');
+    setSelectedIncomeSourceForNewBill(undefined);
     setIsAddBillModalOpen(false);
     toast({ title: t('home.addBillModal.toast.success.title'), description: t('home.addBillModal.toast.success.description', { billName: newBillName }) });
   };
+
+  const openIncomeSourceModal = (source: IncomeSource | null) => {
+    setCurrentIncomeSource(source);
+    if (source) {
+      setIncomeSourceName(source.name);
+      setIncomeSourceAmount(formatCurrency(source.amount));
+    } else {
+      setIncomeSourceName('');
+      setIncomeSourceAmount('');
+    }
+    setIsIncomeSourceModalOpen(true);
+  };
+
+  const handleSaveIncomeSource = () => {
+    const parsedAmount = parseCurrency(incomeSourceAmount);
+    if (!incomeSourceName.trim()) {
+      toast({ variant: "destructive", title: t('generic.error'), description: t('home.incomeSources.dialog.nameLabel') + ' ' + t('home.addBillModal.validation.nameRequired') });
+      return;
+    }
+    if (parsedAmount < 0) { // Allow 0 for income source amount
+      toast({ variant: "destructive", title: t('generic.error'), description: t('home.incomeSources.dialog.amountLabel') + ' ' + t('home.addBillModal.validation.amountRequired') });
+      return;
+    }
+
+    if (currentIncomeSource) { // Editing existing source
+      setIncomeSources(prev => prev.map(s => s.id === currentIncomeSource.id ? { ...s, name: incomeSourceName, amount: parsedAmount } : s));
+      toast({ title: t('home.incomeSources.toast.updated.title'), description: t('home.incomeSources.toast.updated.description', { sourceName: incomeSourceName })});
+    } else { // Adding new source
+      const newSource: IncomeSource = {
+        id: `income-${Date.now()}`,
+        name: incomeSourceName,
+        amount: parsedAmount,
+      };
+      setIncomeSources(prev => [...prev, newSource]);
+      toast({ title: t('home.incomeSources.toast.added.title'), description: t('home.incomeSources.toast.added.description', { sourceName: incomeSourceName }) });
+    }
+    setIsIncomeSourceModalOpen(false);
+  };
+
+  const handleDeleteIncomeSource = (sourceId: string) => {
+    const sourceToDelete = incomeSources.find(s => s.id === sourceId);
+    if (!sourceToDelete) return;
+
+    setIncomeSources(prev => prev.filter(s => s.id !== sourceId));
+    // Also unassign bills from this source
+    setBills(prevBills => prevBills.map(b => b.incomeSourceId === sourceId ? { ...b, incomeSourceId: undefined } : b));
+    toast({ title: t('home.incomeSources.toast.deleted.title'), description: t('home.incomeSources.toast.deleted.description', { sourceName: sourceToDelete.name}) });
+  };
+
 
   const topExpenses = useMemo(() => {
     return [...bills]
@@ -343,7 +400,7 @@ export default function HomePage() {
       .slice(0, 3);
   }, [bills]);
 
-  const chartData = useMemo(() => {
+  const expenseChartData = useMemo(() => {
     return bills
       .filter(bill => bill.amount > 0)
       .map((bill, index) => ({
@@ -353,17 +410,47 @@ export default function HomePage() {
       }));
   }, [bills]);
 
-  const chartConfig = useMemo(() => {
+  const expenseChartConfig = useMemo(() => {
     const config: ChartConfig = {};
-    chartData.forEach(item => {
+    expenseChartData.forEach(item => {
       config[item.name] = {
         label: item.name,
         color: item.fill,
       };
     });
     return config;
-  }, [chartData]);
-  
+  }, [expenseChartData]);
+
+  const incomeContributionChartData = useMemo(() => {
+    const contributions: Record<string, { name: string; value: number; incomeSourceName: string }> = {};
+    bills.forEach(bill => {
+      if (bill.incomeSourceId && bill.amount > 0) {
+        const source = incomeSources.find(s => s.id === bill.incomeSourceId);
+        if (source) {
+          if (!contributions[source.id]) {
+            contributions[source.id] = { name: source.name, value: 0, incomeSourceName: source.name };
+          }
+          contributions[source.id].value += bill.amount;
+        }
+      }
+    });
+    return Object.values(contributions).map((item, index) => ({
+      ...item,
+      fill: `hsl(var(--chart-${(index % 5) + 1}))`,
+    }));
+  }, [bills, incomeSources]);
+
+  const incomeContributionChartConfig = useMemo(() => {
+    const config: ChartConfig = {};
+    incomeContributionChartData.forEach(item => {
+      config[item.incomeSourceName] = { // Use incomeSourceName for unique key if names can repeat
+        label: item.name,
+        color: item.fill,
+      };
+    });
+    return config;
+  }, [incomeContributionChartData]);
+
   if (!isClient || !appStorage) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[calc(100vh-var(--header-height,56px))] p-4 sm:p-8 bg-background">
@@ -414,30 +501,64 @@ export default function HomePage() {
       </header>
 
       <main className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6"> {/* Bills and Income */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Income Sources Card */}
           <Card className="shadow-lg hover:shadow-xl transition-shadow duration-300">
             <CardHeader>
               <CardTitle className="flex items-center text-2xl font-headline">
-                <DollarSign className="mr-2 h-7 w-7 text-primary" />
-                {t('home.incomeCard.title')}
+                <Landmark className="mr-2 h-7 w-7 text-primary" />
+                {t('home.incomeSourcesCard.title')}
               </CardTitle>
-              <CardDescription>{t('home.incomeCard.descriptionPeriod', { month: monthOptions.find(m=>m.value === selectedMonth.toString())?.label || '', year: selectedYear.toString() })}</CardDescription>
+              <CardDescription>{t('home.incomeSourcesCard.descriptionPeriod', { month: monthOptions.find(m=>m.value === selectedMonth.toString())?.label || '', year: selectedYear.toString() })}</CardDescription>
             </CardHeader>
-            <CardContent>
-              <Label htmlFor="income" className="text-sm font-medium">{t('home.incomeCard.label')}</Label>
-              <Input
-                id="income"
-                type="text"
-                value={localIncomeDisplay}
-                onChange={handleIncomeInputChange}
-                onBlur={handleIncomeInputBlur}
-                placeholder={t('currency.placeholder', { exampleAmount: formatCurrency(appStorage?.defaultIncome || 3000)})}
-                className="mt-1 text-lg"
-                aria-label={t('home.incomeCard.label')}
-              />
+            <CardContent className="space-y-3">
+              {incomeSources.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-4">{t('home.incomeSources.noSources')}</p>
+              )}
+              {incomeSources.map(source => (
+                <div key={source.id} className="flex items-center justify-between p-3 border rounded-md bg-card/50 hover:bg-card/80">
+                  <div className="flex-1">
+                    <p className="font-medium text-card-foreground">{source.name}</p>
+                    <p className="text-sm text-primary">{formatCurrency(source.amount)}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="ghost" size="icon" onClick={() => openIncomeSourceModal(source)} aria-label={t('generic.edit')}>
+                      <Edit3 className="h-4 w-4" />
+                    </Button>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive/90 hover:bg-destructive/10" aria-label={t('generic.delete')}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>{t('home.incomeSources.deleteConfirm.title')}</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            {t('home.incomeSources.deleteConfirm.description', { sourceName: source.name })}
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>{t('generic.cancel')}</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => handleDeleteIncomeSource(source.id)} className="bg-destructive hover:bg-destructive/90">
+                            {t('generic.delete')}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                </div>
+              ))}
             </CardContent>
+            <CardFooter>
+              <Button variant="outline" className="w-full" onClick={() => openIncomeSourceModal(null)}>
+                <PlusCircle className="mr-2 h-4 w-4" />
+                {t('home.incomeSourcesCard.addSourceButton')}
+              </Button>
+            </CardFooter>
           </Card>
 
+          {/* Bills Card */}
           <Card className="shadow-lg hover:shadow-xl transition-shadow duration-300">
             <CardHeader>
               <CardTitle className="flex items-center text-2xl font-headline">
@@ -448,19 +569,38 @@ export default function HomePage() {
             </CardHeader>
             <CardContent className="space-y-4">
               {bills.map(bill => (
-                <div key={bill.id} className="flex items-center space-x-3">
-                  <bill.icon className="h-6 w-6 text-accent flex-shrink-0" aria-hidden="true" />
-                  <Label htmlFor={bill.id} className="flex-1 text-sm font-medium">{bill.name}</Label>
+                <div key={bill.id} className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-x-3 gap-y-1 p-2 border-b last:border-b-0">
+                  <bill.icon className="h-6 w-6 text-accent flex-shrink-0 row-span-2" aria-hidden="true" />
+                  <Label htmlFor={`bill-name-${bill.id}`} className="flex-1 text-sm font-medium col-span-2">{bill.name}</Label>
                   <Input
-                    id={bill.id}
+                    id={`bill-amount-${bill.id}`}
                     type="text" 
                     value={formatCurrency(bill.amount)} 
                     onChange={(e) => handleBillAmountDisplayChange(bill.id, e.target.value)}
-                    onBlur={(e) => handleBillAmountInputBlur(bill.id, e.target.value)}
+                    onBlur={(e) => { /* value already updated */ }}
                     placeholder={formatCurrency(0)}
-                    className="w-32 text-right"
+                    className="w-32 text-right row-start-1 col-start-4"
                     aria-label={`${bill.name} ${t('home.addBillModal.amountLabel')}`}
                   />
+                  <Label htmlFor={`bill-source-${bill.id}`} className="text-xs text-muted-foreground col-start-2">{t('home.bills.assignIncomeSourceLabel')}:</Label>
+                  <Select
+                    value={bill.incomeSourceId || "unassigned"}
+                    onValueChange={(value) => handleBillIncomeSourceChange(bill.id, value)}
+                  >
+                    <SelectTrigger id={`bill-source-${bill.id}`} className="w-full col-start-3 col-span-1 text-xs h-8">
+                       <SelectValue placeholder={t('home.bills.unassignedIncomeSource')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unassigned">{t('home.bills.unassignedIncomeSource')}</SelectItem>
+                      {incomeSources.length > 0 ? (
+                        incomeSources.map(source => (
+                          <SelectItem key={source.id} value={source.id}>{source.name}</SelectItem>
+                        ))
+                      ) : (
+                        <SelectItem value="no-sources" disabled>{t('home.bills.noIncomeSourcesAvailable')}</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
                 </div>
               ))}
                <Dialog open={isAddBillModalOpen} onOpenChange={setIsAddBillModalOpen}>
@@ -498,6 +638,23 @@ export default function HomePage() {
                         placeholder={formatCurrency(0)}
                       />
                     </div>
+                    <div>
+                      <Label htmlFor="newBillIncomeSource">{t('home.bills.assignIncomeSourceLabel')}</Label>
+                      <Select 
+                        value={selectedIncomeSourceForNewBill} 
+                        onValueChange={setSelectedIncomeSourceForNewBill}
+                        >
+                        <SelectTrigger id="newBillIncomeSource">
+                          <SelectValue placeholder={t('home.bills.unassignedIncomeSource')} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="unassigned">{t('home.bills.unassignedIncomeSource')}</SelectItem>
+                          {incomeSources.map(source => (
+                            <SelectItem key={source.id} value={source.id}>{source.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                   <DialogFooter>
                     <Button variant="outline" onClick={() => setIsAddBillModalOpen(false)}>{t('generic.cancel')}</Button>
@@ -509,7 +666,7 @@ export default function HomePage() {
           </Card>
         </div>
 
-        <div className="space-y-6"> {/* Summary, Chart, Insights */}
+        <div className="space-y-6"> {/* Summary, Charts, Insights */}
           <Card className="shadow-lg hover:shadow-xl transition-shadow duration-300">
             <CardHeader>
               <CardTitle className="text-2xl font-headline">{t('home.summaryCard.title')}</CardTitle>
@@ -518,7 +675,7 @@ export default function HomePage() {
             <CardContent className="space-y-4">
               <div className="flex justify-between items-center">
                 <span className="text-sm text-muted-foreground">{t('home.summaryCard.totalIncome')}</span>
-                <span className="font-semibold text-lg text-primary">{formatCurrency(income)}</span>
+                <span className="font-semibold text-lg text-primary">{formatCurrency(totalIncome)}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm text-muted-foreground">{t('home.summaryCard.totalExpenses')}</span>
@@ -569,12 +726,12 @@ export default function HomePage() {
               <CardDescription>{t('home.chartCard.descriptionPeriod', { month: monthOptions.find(m=>m.value === selectedMonth.toString())?.label || '', year: selectedYear.toString() })}</CardDescription>
             </CardHeader>
             <CardContent>
-              {chartData.length > 0 ? (
-                <ChartContainer config={chartConfig} className="mx-auto aspect-square h-[250px] w-full">
+              {expenseChartData.length > 0 ? (
+                <ChartContainer config={expenseChartConfig} className="mx-auto aspect-square h-[250px] w-full">
                   <PieChart>
                     <ChartTooltip content={<ChartTooltipContent hideLabel />} />
-                    <Pie data={chartData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} labelLine={false} label={({ percent }) => `${(percent * 100).toFixed(0)}%`}>
-                      {chartData.map((entry, index) => (
+                    <Pie data={expenseChartData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} labelLine={false} label={({ percent }) => `${(percent * 100).toFixed(0)}%`}>
+                      {expenseChartData.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.fill} />
                       ))}
                     </Pie>
@@ -586,6 +743,34 @@ export default function HomePage() {
               )}
             </CardContent>
           </Card>
+
+          <Card className="shadow-lg hover:shadow-xl transition-shadow duration-300">
+            <CardHeader>
+              <CardTitle className="flex items-center text-2xl font-headline">
+                <DollarSign className="mr-2 h-7 w-7 text-primary" /> {/* Consider a different icon if needed */}
+                {t('home.incomeContributionChart.title')}
+              </CardTitle>
+              <CardDescription>{t('home.incomeContributionChart.descriptionPeriod', { month: monthOptions.find(m=>m.value === selectedMonth.toString())?.label || '', year: selectedYear.toString() })}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {incomeContributionChartData.length > 0 ? (
+                 <ChartContainer config={incomeContributionChartConfig} className="mx-auto aspect-square h-[250px] w-full">
+                  <PieChart>
+                    <ChartTooltip content={<ChartTooltipContent nameKey="name" hideLabel />} />
+                    <Pie data={incomeContributionChartData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} labelLine={false} label={({ percent }) => `${(percent * 100).toFixed(0)}%`}>
+                      {incomeContributionChartData.map((entry, index) => (
+                        <Cell key={`cell-income-contrib-${index}`} fill={entry.fill} />
+                      ))}
+                    </Pie>
+                    <ChartLegend content={<ChartLegendContent nameKey="name" />} />
+                  </PieChart>
+                </ChartContainer>
+              ) : (
+                <p className="text-sm text-muted-foreground text-center py-10">{t('home.incomeContributionChart.noData')}</p>
+              )}
+            </CardContent>
+          </Card>
+
 
           <Card className="shadow-lg hover:shadow-xl transition-shadow duration-300">
             <CardHeader>
@@ -621,7 +806,7 @@ export default function HomePage() {
             <CardFooter>
               <Button
                 onClick={handleGenerateInsights}
-                disabled={isLoadingInsights || (income === 0 && bills.every(b => b.amount === 0))}
+                disabled={isLoadingInsights || (totalIncome === 0 && bills.every(b => b.amount === 0))}
                 className="w-full"
                 aria-label={t('home.insightsCard.generateButton')}
               >
@@ -636,6 +821,45 @@ export default function HomePage() {
           </Card>
         </div>
       </main>
+
+      {/* Income Source Modal */}
+      <Dialog open={isIncomeSourceModalOpen} onOpenChange={setIsIncomeSourceModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{currentIncomeSource ? t('home.incomeSources.dialog.editTitle') : t('home.incomeSources.dialog.addTitle')}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div>
+              <Label htmlFor="incomeSourceName">{t('home.incomeSources.dialog.nameLabel')}</Label>
+              <Input 
+                id="incomeSourceName" 
+                value={incomeSourceName} 
+                onChange={(e) => setIncomeSourceName(e.target.value)} 
+                placeholder={t('home.incomeSources.dialog.namePlaceholder')}
+              />
+            </div>
+            <div>
+              <Label htmlFor="incomeSourceAmount">{t('home.incomeSources.dialog.amountLabel')}</Label>
+              <Input 
+                id="incomeSourceAmount" 
+                type="text" 
+                value={incomeSourceAmount} 
+                onChange={(e) => setIncomeSourceAmount(e.target.value)} 
+                onBlur={(e) => {
+                    const numericValue = parseCurrency(e.target.value);
+                    setIncomeSourceAmount(formatCurrency(numericValue)); 
+                }}
+                placeholder={formatCurrency(0)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsIncomeSourceModalOpen(false)}>{t('generic.cancel')}</Button>
+            <Button onClick={handleSaveIncomeSource}>{t('home.incomeSources.dialog.saveButton')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <footer className="w-full max-w-5xl mt-12 pt-6 border-t border-border text-center">
         <p className="text-sm text-muted-foreground">
           {t('home.footer.copyright', { year: new Date().getFullYear(), appName: siteConfig.name })}
@@ -647,5 +871,3 @@ export default function HomePage() {
     </div>
   );
 }
-
-    

@@ -10,34 +10,40 @@ export interface BillConfig {
 
 export interface Bill {
   id: string;
-  name: string; // Display name (translated or custom)
-  nameKey?: string; // Translation key for predefined bills
+  name: string; 
+  nameKey?: string; 
   icon: LucideIcon;
   amount: number;
   isCustom?: boolean;
+  incomeSourceId?: string; // ID of the income source paying this bill
 }
 
 export interface StoredBillData {
   id: string;
   amount: number;
-  name?: string; // Only for custom bills
+  name?: string; 
   isCustom?: boolean;
+  incomeSourceId?: string; 
+}
+
+export interface IncomeSource {
+  id: string;
+  name: string;
+  amount: number;
 }
 
 // Represents data for a specific month and year
 export interface MonthlyData {
   year: number;
   month: number; // 1 for January, 12 for December
-  income: number;
+  incomeSources: IncomeSource[]; // Changed from single income to array of sources
   bills: StoredBillData[];
-  // insights?: string; // Optional: store insights per month in the future
 }
 
 export type Locale = 'en' | 'pt';
 
-// New structure for data stored in localStorage
 export interface AppStorage {
   userLocale: Locale;
-  defaultIncome?: number; // Default income for new months, set from settings
-  allMonthlyData: MonthlyData[]; // Array of all monthly financial records
+  defaultIncome?: number; 
+  allMonthlyData: MonthlyData[]; 
 }
