@@ -10,7 +10,7 @@
  */
 
 import {ai} from '@/ai/genkit';
-import {z} from 'genkit'; // Changed from '@genkit-ai/ai' for Zod
+import {z} from 'genkit';
 
 const SpendingInsightsInputSchema = z.object({
   income: z.number().describe('The total income amount.'),
@@ -20,6 +20,7 @@ const SpendingInsightsInputSchema = z.object({
       amount: z.number().describe('The amount spent on the expense.'),
     }))
     .describe('An array of expenses with their categories and amounts.'),
+  language: z.string().describe('The desired language for the insights, e.g., "English" or "Portuguese".'),
 });
 export type SpendingInsightsInput = z.infer<typeof SpendingInsightsInputSchema>;
 
@@ -32,12 +33,13 @@ export async function getSpendingInsights(input: SpendingInsightsInput): Promise
   return spendingInsightsFlow(input);
 }
 
-// Updated to use ai.definePrompt
 const spendingInsightsPrompt = ai.definePrompt({
   name: 'spendingInsightsPrompt',
   input: {schema: SpendingInsightsInputSchema},
   output: {schema: SpendingInsightsOutputSchema},
   prompt: `You are a financial advisor providing personalized insights into spending habits.
+
+  Generate the insights in the following language: {{{language}}}.
 
   Based on the following income and expenses, provide insights into the user's spending habits, and suggest areas where they can save money and improve their financial health.
 
@@ -49,7 +51,6 @@ const spendingInsightsPrompt = ai.definePrompt({
   `,
 });
 
-// Updated to use ai.defineFlow
 const spendingInsightsFlow = ai.defineFlow(
   {
     name: 'spendingInsightsFlow',
@@ -57,8 +58,7 @@ const spendingInsightsFlow = ai.defineFlow(
     outputSchema: SpendingInsightsOutputSchema,
   },
   async input => {
-    // Updated to call the prompt directly and access .output
     const {output} = await spendingInsightsPrompt(input);
-    return output!; // Use non-null assertion as per Genkit v1.x examples
+    return output!;
   }
 );

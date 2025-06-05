@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger, DialogClose } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { Droplet, Zap, Wifi, Home, DollarSign, LineChart, AlertCircle, Loader2, Brain, Settings as SettingsIcon, Receipt, PlusCircle } from 'lucide-react';
 import type { Bill, FinancialData, BillConfig, StoredBillData } from '@/types';
 import { getSpendingInsights } from '@/ai/flows/spending-insights';
@@ -29,7 +29,7 @@ const PREDEFINED_BILLS_CONFIG: BillConfig[] = [
 ];
 
 export default function HomePage() {
-  const { t, formatCurrency, parseCurrency, getLocale } = useLocalization();
+  const { t, formatCurrency, parseCurrency, getLocale, locale } = useLocalization();
   const [income, setIncome] = useState<number>(0);
   const [localIncomeDisplay, setLocalIncomeDisplay] = useState('');
   const [bills, setBills] = useState<Bill[]>([]);
@@ -154,23 +154,8 @@ export default function HomePage() {
     setIncome(numericValue);
     setLocalIncomeDisplay(formatCurrency(numericValue));
   };
-
-  const handleBillAmountChange = (billId: string, amountStr: string) => {
-    // Allow direct input for amounts, parse on blur for bills as well
-    setBills(prevBills =>
-      prevBills.map(bill =>
-        bill.id === billId ? { ...bill, amount: parseCurrency(amountStr) } : bill // Store numeric value
-      )
-    );
-  };
   
   const handleBillAmountDisplayChange = (billId: string, displayValue: string) => {
-    // This is a bit tricky; we need to update the bill's amount for calculation,
-    // but also keep a local display version for each input if we want live formatting.
-    // For simplicity, we'll update the numeric amount and rely on re-render to format display.
-    // Or, manage display strings separately. For now, let's just parse and update.
-    // The input value prop will be formatCurrency(bill.amount)
-    // So, on change, we parse.
     const numericAmount = parseCurrency(displayValue);
     setBills(prevBills =>
       prevBills.map(bill =>
@@ -190,7 +175,7 @@ export default function HomePage() {
 
   const expenseRatio = useMemo(() => {
     if (income === 0) return 0;
-    return Math.min((totalExpenses / income) * 100, 100);
+    return Math.min(Math.max(0, (totalExpenses / income) * 100), 100); // Ensure ratio is between 0 and 100
   }, [income, totalExpenses]);
 
   const handleGenerateInsights = useCallback(async () => {
@@ -198,9 +183,13 @@ export default function HomePage() {
     setErrorInsights(null);
     setInsights(null);
 
+    const currentLocale = getLocale();
+    const languageForAI = currentLocale === 'pt' ? 'Portuguese' : 'English';
+
     const insightInput: SpendingInsightsInput = {
       income,
       expenses: bills.map(bill => ({ category: bill.name, amount: bill.amount })),
+      language: languageForAI,
     };
 
     try {
@@ -218,15 +207,19 @@ export default function HomePage() {
     } finally {
       setIsLoadingInsights(false);
     }
-  }, [income, bills, toast, t]);
+  }, [income, bills, toast, t, getLocale]);
 
   const handleAddNewBill = () => {
     const parsedAmount = parseCurrency(newBillAmount);
-    if (!newBillName.trim() || parsedAmount <= 0) {
-      // Basic validation
-      toast({ variant: "destructive", title: t('generic.error'), description: "Please enter a valid bill name and amount." });
+    if (!newBillName.trim()) {
+      toast({ variant: "destructive", title: t('generic.error'), description: t('home.addBillModal.validation.nameRequired') });
       return;
     }
+    if (parsedAmount <= 0) {
+      toast({ variant: "destructive", title: t('generic.error'), description: t('home.addBillModal.validation.amountRequired') });
+      return;
+    }
+
     const newBill: Bill = {
       id: `custom-${Date.now()}`,
       name: newBillName,
@@ -238,11 +231,12 @@ export default function HomePage() {
     setNewBillName('');
     setNewBillAmount('');
     setIsAddBillModalOpen(false);
+    toast({ title: t('home.addBillModal.toast.success.title'), description: t('home.addBillModal.toast.success.description', { billName: newBillName }) });
   };
   
   if (!isClient) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[calc(100vh-56px)] p-4 sm:p-8 bg-background">
+      <div className="flex flex-col items-center justify-center min-h-[calc(100vh-var(--header-height,56px))] p-4 sm:p-8 bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
         <p className="mt-4 text-lg text-foreground">{t('app.loading')}</p>
       </div>
@@ -250,7 +244,7 @@ export default function HomePage() {
   }
 
   return (
-    <div className="flex flex-col items-center min-h-[calc(100vh-56px)] p-4 sm:p-8 bg-background selection:bg-primary/20">
+    <div className="flex flex-col items-center min-h-[calc(100vh-var(--header-height,56px))] p-4 sm:p-8 bg-background selection:bg-primary/20">
       <header className="w-full max-w-5xl mb-8 text-center">
         <h1 className="text-4xl font-bold tracking-tight text-foreground sm:text-5xl font-headline">
           {t('home.welcome', { appName: siteConfig.name })}
@@ -306,9 +300,17 @@ export default function HomePage() {
                   <Label htmlFor={bill.id} className="flex-1 text-sm font-medium">{bill.name}</Label>
                   <Input
                     id={bill.id}
-                    type="text" // For formatted currency
-                    value={formatCurrency(bill.amount)} // Display formatted currency
+                    type="text" 
+                    value={formatCurrency(bill.amount)} 
                     onChange={(e) => handleBillAmountDisplayChange(bill.id, e.target.value)}
+                    onBlur={(e) => { // Re-format on blur to ensure consistency
+                        const numericAmount = parseCurrency(e.target.value);
+                        const formatted = formatCurrency(numericAmount);
+                         if (e.target.value !== formatted) { // Only update if formatting changed it
+                            e.target.value = formatted; // Visually update the input
+                            // State update happens in handleBillAmountDisplayChange
+                         }
+                    }}
                     placeholder={formatCurrency(0)}
                     className="w-32 text-right"
                     aria-label={`${bill.name} ${t('home.addBillModal.amountLabel')}`}
@@ -329,7 +331,12 @@ export default function HomePage() {
                   <div className="space-y-4 py-4">
                     <div>
                       <Label htmlFor="newBillName">{t('home.addBillModal.nameLabel')}</Label>
-                      <Input id="newBillName" value={newBillName} onChange={(e) => setNewBillName(e.target.value)} />
+                      <Input 
+                        id="newBillName" 
+                        value={newBillName} 
+                        onChange={(e) => setNewBillName(e.target.value)} 
+                        placeholder={t('home.addBillModal.namePlaceholder')}
+                        />
                     </div>
                     <div>
                       <Label htmlFor="newBillAmount">{t('home.addBillModal.amountLabel')}</Label>
@@ -338,7 +345,10 @@ export default function HomePage() {
                         type="text" 
                         value={newBillAmount} 
                         onChange={(e) => setNewBillAmount(e.target.value)} 
-                        onBlur={(e) => setNewBillAmount(formatCurrency(parseCurrency(e.target.value)))}
+                        onBlur={(e) => {
+                            const numericValue = parseCurrency(e.target.value);
+                            setNewBillAmount(formatCurrency(numericValue));
+                        }}
                         placeholder={formatCurrency(0)}
                       />
                     </div>
@@ -384,6 +394,11 @@ export default function HomePage() {
                         {t('home.summaryCard.expensesExceedIncome')}
                     </p>
                 )}
+                 {income > 0 && expenseRatio === 0 && totalExpenses > 0 && (
+                     <p className="text-xs text-muted-foreground mt-1 flex items-center">
+                        {t('home.summaryCard.lowExpenseRatio')}
+                    </p>
+                 )}
               </div>
             </CardContent>
           </Card>
@@ -422,7 +437,7 @@ export default function HomePage() {
             <CardFooter>
               <Button
                 onClick={handleGenerateInsights}
-                disabled={isLoadingInsights || income === 0 && bills.every(b => b.amount === 0)}
+                disabled={isLoadingInsights || (income === 0 && bills.every(b => b.amount === 0))}
                 className="w-full"
                 aria-label={t('home.insightsCard.generateButton')}
               >
@@ -440,6 +455,9 @@ export default function HomePage() {
       <footer className="w-full max-w-5xl mt-12 pt-6 border-t border-border text-center">
         <p className="text-sm text-muted-foreground">
           {t('home.footer.copyright', { year: new Date().getFullYear(), appName: siteConfig.name })}
+        </p>
+        <p className="text-xs text-muted-foreground/80 mt-1">
+          {t('home.footer.poweredByFirebase')}
         </p>
       </footer>
     </div>
