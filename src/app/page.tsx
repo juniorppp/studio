@@ -96,7 +96,7 @@ export default function HomePage() {
   const [isIncomeSourceModalOpen, setIsIncomeSourceModalOpen] = useState(false);
   const [currentIncomeSource, setCurrentIncomeSource] = useState<IncomeSource | null>(null); // For editing
   const [incomeSourceName, setIncomeSourceName] = useState('');
-  const [incomeSourceAmount, setIncomeSourceAmount] = useState('');
+  const [incomeSourceAmount, setIncomeSourceAmount] = useState(''); // This will store the formatted string for live input
 
   const yearOptions = useMemo(() => generateYearOptions(), []);
   const monthOptions = useMemo(() => generateMonthOptions(t, locale), [t, locale]);
@@ -198,13 +198,29 @@ export default function HomePage() {
         year: selectedYear,
         month: selectedMonth,
         incomeSources: [{
-            id: `primary-${selectedYear}-${selectedMonth}-${Date.now()}`, // More unique ID
+            id: `primary-${selectedYear}-${selectedMonth}-${Date.now()}`, 
             name: primaryIncomeName,
             amount: appStorage.defaultIncome || 0
         }],
         bills: initializePredefinedBills(),
       };
+    } else {
+      // Ensure primary income source from settings is present if defaultIncome > 0
+      // This handles cases where data might exist from before primary income was auto-added
+      // or if default income was set later. For simplicity, we assume if sources exist, user manages them.
+      // If incomeSources is empty and defaultIncome > 0, add the primary one.
+      if (monthData.incomeSources.length === 0 && (appStorage.defaultIncome || 0) > 0) {
+        const primaryIncomeName = appStorage.defaultIncomeSourceName?.trim()
+          ? appStorage.defaultIncomeSourceName
+          : t('home.incomeSources.defaultPrimaryName');
+        monthData.incomeSources.push({
+          id: `primary-${selectedYear}-${selectedMonth}-${Date.now()}`,
+          name: primaryIncomeName,
+          amount: appStorage.defaultIncome || 0
+        });
+      }
     }
+
 
     setCurrentMonthlyData(monthData);
     setIncomeSources(monthData.incomeSources || []);
@@ -226,15 +242,18 @@ export default function HomePage() {
     const newAppStorage: AppStorage = {
       ...appStorage,
       allMonthlyData: updatedAllMonthlyData,
-      userLocale: getLocale(),
+      userLocale: getLocale(), // Keep userLocale in sync
+      defaultIncome: appStorage.defaultIncome, // Preserve settings
+      defaultIncomeSourceName: appStorage.defaultIncomeSourceName, // Preserve settings
     };
 
+    // Only update if there's a meaningful change to avoid unnecessary writes or loops
     if (JSON.stringify(appStorage) !== JSON.stringify(newAppStorage)) {
       setAppStorage(newAppStorage);
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(newAppStorage));
     }
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(newAppStorage));
 
-  }, [currentMonthlyData, isClient, getLocale, appStorage]);
+  }, [currentMonthlyData, isClient, getLocale, appStorage]); // appStorage is a dependency
 
    useEffect(() => {
     if (isClient && bills.length > 0) {
@@ -243,7 +262,7 @@ export default function HomePage() {
           name: bill.isCustom ? bill.name : (t(bill.nameKey || '') || PREDEFINED_BILLS_CONFIG.find(pb => pb.id === bill.id)?.defaultName || t('home.bills.customBillFallback'))
         })));
     }
-  }, [t, locale, isClient]);
+  }, [t, locale, isClient]); // Removed bills from dependencies to avoid loops if names don't actually change based on t/locale
 
   const handleBillAmountDisplayChange = (billId: string, displayValue: string) => {
     const newAmount = parseCurrency(displayValue);
@@ -276,8 +295,8 @@ export default function HomePage() {
 
   const expenseRatio = useMemo(() => {
     if (totalIncome === 0 && totalExpenses === 0) return 0;
-    if (totalIncome === 0) return totalExpenses > 0 ? 1000 : 0;
-    return Math.min(Math.max(0, (totalExpenses / totalIncome) * 100), 1000);
+    if (totalIncome === 0) return totalExpenses > 0 ? 1000 : 0; // Represent as very high if income is 0 but expenses exist
+    return Math.min(Math.max(0, (totalExpenses / totalIncome) * 100), 1000); // Cap at 1000 for display
   }, [totalIncome, totalExpenses]);
 
   const handleGenerateInsights = useCallback(async () => {
@@ -295,7 +314,7 @@ export default function HomePage() {
       incomeSources: currentMonthlyData.incomeSources.map(s => ({name: s.name, amount: s.amount })),
       totalIncome: totalIncomeForAI,
       expenses: currentMonthlyData.bills.map(b => {
-          const uiBill = bills.find(ui_b => ui_b.id === b.id);
+          const uiBill = bills.find(ui_b => ui_b.id === b.id); // Use current UI state for name
           const name = uiBill ? uiBill.name : (b.isCustom ? b.name : t('home.bills.customBillFallback'));
           const paidBySource = currentMonthlyData.incomeSources.find(src => src.id === b.incomeSourceId);
           return {
@@ -330,7 +349,7 @@ export default function HomePage() {
       toast({ variant: "destructive", title: t('generic.error'), description: t('home.addBillModal.validation.nameRequired') });
       return;
     }
-    if (parsedAmount <= 0) {
+    if (parsedAmount <= 0) { // Amount must be positive
       toast({ variant: "destructive", title: t('generic.error'), description: t('home.addBillModal.validation.amountRequired') });
       return;
     }
@@ -338,7 +357,7 @@ export default function HomePage() {
     const newBillEntry: Bill = {
       id: `custom-${Date.now()}`,
       name: newBillName,
-      icon: Receipt,
+      icon: Receipt, // Generic icon for custom bills
       amount: parsedAmount,
       isCustom: true,
       incomeSourceId: selectedIncomeSourceForNewBill === "unassigned" ? undefined : selectedIncomeSourceForNewBill,
@@ -349,32 +368,42 @@ export default function HomePage() {
     setCurrentMonthlyData(prev => prev ? { ...prev, bills: billsToStoredBillsArray(updatedBills) } : null);
 
     setNewBillName('');
-    setNewBillAmount('');
+    setNewBillAmount(''); // Reset to empty, not formatted 0
     setSelectedIncomeSourceForNewBill(undefined);
     setIsAddBillModalOpen(false);
     toast({ title: t('home.addBillModal.toast.success.title'), description: t('home.addBillModal.toast.success.description', { billName: newBillEntry.name }) });
+  };
+
+  const handleDeleteBill = (billIdToDelete: string) => {
+    const billToDelete = bills.find(b => b.id === billIdToDelete);
+    if (!billToDelete) return;
+
+    const updatedBills = bills.filter(bill => bill.id !== billIdToDelete);
+    setBills(updatedBills);
+    setCurrentMonthlyData(prev => prev ? { ...prev, bills: billsToStoredBillsArray(updatedBills) } : null);
+    toast({ title: t('home.deleteBillModal.toast.success.title'), description: t('home.deleteBillModal.toast.success.description', { billName: billToDelete.name }) });
   };
 
   const openIncomeSourceModal = (source: IncomeSource | null) => {
     setCurrentIncomeSource(source);
     if (source) {
       setIncomeSourceName(source.name);
-      setIncomeSourceAmount(formatCurrency(source.amount));
+      setIncomeSourceAmount(formatCurrency(source.amount)); // Format for display
     } else {
       setIncomeSourceName('');
-      setIncomeSourceAmount('');
+      setIncomeSourceAmount(''); // Reset to empty for placeholder to show
     }
     setIsIncomeSourceModalOpen(true);
   };
 
   const handleSaveIncomeSource = () => {
-    const parsedAmount = parseCurrency(incomeSourceAmount);
+    const parsedAmount = parseCurrency(incomeSourceAmount); // Parse the display string
     if (!incomeSourceName.trim()) {
       toast({ variant: "destructive", title: t('generic.error'), description: t('home.incomeSources.dialog.nameLabel') + ' ' + t('home.addBillModal.validation.nameRequired') });
       return;
     }
-    if (parsedAmount < 0) {
-      toast({ variant: "destructive", title: t('generic.error'), description: t('home.incomeSources.dialog.amountLabel') + ' ' + t('home.addBillModal.validation.amountRequired') });
+    if (parsedAmount < 0) { // Allow 0, but not negative
+      toast({ variant: "destructive", title: t('generic.error'), description: t('home.incomeSources.dialog.amountLabel') + ' ' + t('home.addBillModal.validation.amountMustBePositiveOrZero') });
       return;
     }
 
@@ -403,6 +432,7 @@ export default function HomePage() {
     const updatedIncomeSources = incomeSources.filter(s => s.id !== sourceId);
     setIncomeSources(updatedIncomeSources);
 
+    // Unassign bills from this deleted source
     const updatedBills = bills.map(b => b.incomeSourceId === sourceId ? { ...b, incomeSourceId: undefined } : b);
     setBills(updatedBills);
 
@@ -424,19 +454,23 @@ export default function HomePage() {
     const nextYear = getYear(nextMonthDate);
 
     let nextMonthData = appStorage.allMonthlyData.find(d => d.year === nextYear && d.month === nextMonth);
-    const newAllMonthlyData = [...appStorage.allMonthlyData];
+    const newAllMonthlyData = [...appStorage.allMonthlyData]; // Create a mutable copy
 
     const replicatedStoredBill = billToStoredBill(billToReplicate);
 
     if (nextMonthData) {
-      // Check if bill already exists (by ID) to avoid duplicates, or update if desired (here we add, could update)
+      // Filter out the old version of this month's data
+      const index = newAllMonthlyData.findIndex(d => d.year === nextYear && d.month === nextMonth);
+      if (index > -1) newAllMonthlyData.splice(index, 1);
+
+
       const billExists = nextMonthData.bills.some(b => b.id === replicatedStoredBill.id);
       if (!billExists) {
          nextMonthData.bills.push(replicatedStoredBill);
       } else {
-        // Optionally update existing bill or notify user
         nextMonthData.bills = nextMonthData.bills.map(b => b.id === replicatedStoredBill.id ? replicatedStoredBill : b);
       }
+       newAllMonthlyData.push(nextMonthData); // Add back the modified data
     } else {
       const primaryIncomeName = appStorage.defaultIncomeSourceName?.trim()
         ? appStorage.defaultIncomeSourceName
@@ -449,18 +483,19 @@ export default function HomePage() {
           name: primaryIncomeName,
           amount: appStorage.defaultIncome || 0
         }],
-        bills: [...initializePredefinedBills(), replicatedStoredBill], // Add predefined and then the replicated one
+        // Initialize with predefined bills, then add the replicated one, ensuring no ID clash if predefined was also replicated
+        bills: [...initializePredefinedBills().filter(pb => pb.id !== replicatedStoredBill.id), replicatedStoredBill],
       };
       newAllMonthlyData.push(nextMonthData);
     }
 
     const updatedAppStorage: AppStorage = {
       ...appStorage,
-      allMonthlyData: newAllMonthlyData.map(d => (d.year === nextYear && d.month === nextMonth) ? nextMonthData! : d),
+      allMonthlyData: newAllMonthlyData,
     };
 
-    setAppStorage(updatedAppStorage);
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedAppStorage));
+    setAppStorage(updatedAppStorage); // This will trigger the useEffect to save to localStorage
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedAppStorage)); // Explicit save
 
     const nextMonthFormatted = format(nextMonthDate, 'LLLL', { locale: locale === 'pt' ? ptBR : enUS });
     toast({
@@ -521,8 +556,8 @@ export default function HomePage() {
   const incomeContributionChartConfig = useMemo(() => {
     const config: ChartConfig = {};
     incomeContributionChartData.forEach(item => {
-      config[item.incomeSourceName] = {
-        label: item.name,
+      config[item.incomeSourceName] = { // Use incomeSourceName for key if it's unique and preferred
+        label: item.name, // item.name is incomeSourceName here
         color: item.fill,
       };
     });
@@ -647,7 +682,7 @@ export default function HomePage() {
             </CardHeader>
             <CardContent className="space-y-4">
               {bills.map(bill => (
-                <div key={bill.id} className="grid grid-cols-[auto_1fr_auto_auto_auto] items-center gap-x-3 gap-y-1 p-2 border-b last:border-b-0">
+                <div key={bill.id} className="grid grid-cols-[auto_1fr_auto_auto_auto_auto] items-center gap-x-3 gap-y-1 p-2 border-b last:border-b-0">
                   <bill.icon className="h-6 w-6 text-accent flex-shrink-0 row-span-2" aria-hidden="true" />
                   <Label htmlFor={`bill-name-${bill.id}`} className="flex-1 text-sm font-medium col-span-2">{bill.name}</Label>
                    <Button
@@ -659,13 +694,40 @@ export default function HomePage() {
                     >
                       <ArrowRightCircle className="h-4 w-4" />
                     </Button>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-destructive hover:text-destructive/90 hover:bg-destructive/10 row-start-1 col-start-4 justify-self-end"
+                        aria-label={t('home.bills.deleteBillLabel')}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>{t('home.deleteBillModal.title')}</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          {t('home.deleteBillModal.description', { billName: bill.name })}
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>{t('generic.cancel')}</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => handleDeleteBill(bill.id)} className="bg-destructive hover:bg-destructive/90">
+                          {t('generic.delete')}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
                   <Input
                     id={`bill-amount-${bill.id}`}
-                    type="text"
+                    type="text" // Use text for more control with formatting
                     value={formatCurrency(bill.amount)}
                     onChange={(e) => handleBillAmountDisplayChange(bill.id, e.target.value)}
+                    // onBlur is not strictly needed if onChange handles parsing and state update correctly for live effect
                     placeholder={formatCurrency(0)}
-                    className="w-28 text-right row-start-1 col-start-4"
+                    className="w-28 text-right row-start-1 col-start-5" // Adjusted col-start
                     aria-label={`${bill.name} ${t('home.addBillModal.amountLabel')}`}
                   />
                   <Label htmlFor={`bill-source-${bill.id}`} className="text-xs text-muted-foreground col-start-2">{t('home.bills.assignIncomeSourceLabel')}:</Label>
@@ -673,7 +735,7 @@ export default function HomePage() {
                     value={bill.incomeSourceId || "unassigned"}
                     onValueChange={(value) => handleBillIncomeSourceChange(bill.id, value)}
                   >
-                    <SelectTrigger id={`bill-source-${bill.id}`} className="w-full col-start-3 col-span-2 text-xs h-8"> {/* Adjusted col-span */}
+                    <SelectTrigger id={`bill-source-${bill.id}`} className="w-full col-start-3 col-span-3 text-xs h-8"> {/* Adjusted col-span */}
                        <SelectValue placeholder={t('home.bills.unassignedIncomeSource')} />
                     </SelectTrigger>
                     <SelectContent>
@@ -715,9 +777,9 @@ export default function HomePage() {
                       <Input
                         id="newBillAmount"
                         type="text"
-                        value={newBillAmount}
-                        onChange={(e) => setNewBillAmount(e.target.value)}
-                        onBlur={(e) => {
+                        value={newBillAmount} // Controlled by string state
+                        onChange={(e) => setNewBillAmount(e.target.value)} // Update string state directly
+                        onBlur={(e) => { // Format on blur
                             const numericValue = parseCurrency(e.target.value);
                             setNewBillAmount(formatCurrency(numericValue));
                         }}
@@ -776,7 +838,7 @@ export default function HomePage() {
               </div>
               <div>
                 <Label className="text-xs text-muted-foreground">{t('home.summaryCard.expenseRatio', { ratio: expenseRatio > 1000 ? ">1000" : expenseRatio.toFixed(0) })}</Label>
-                <Progress value={Math.min(expenseRatio, 100)} className="w-full mt-1 h-3" indicatorClassName={expenseRatio > 80 ? "bg-destructive" : "bg-primary"} />
+                <Progress value={Math.min(expenseRatio, 100)} className="w-full mt-1 h-3" indicatorClassName={expenseRatio > 80 ? "bg-destructive" : (expenseRatio > 100 ? "bg-destructive" : "bg-primary")} />
                  {expenseRatio > 100 && (
                     <p className="text-xs text-destructive mt-1 flex items-center">
                         <AlertCircle className="h-3 w-3 mr-1" />
@@ -928,10 +990,13 @@ export default function HomePage() {
               <Label htmlFor="incomeSourceAmount">{t('home.incomeSources.dialog.amountLabel')}</Label>
               <Input
                 id="incomeSourceAmount"
-                type="text"
-                value={incomeSourceAmount}
-                onChange={(e) => setIncomeSourceAmount(e.target.value)}
-                onBlur={(e) => {
+                type="text" // Keep as text for controlled input
+                value={incomeSourceAmount} // Controlled by string state
+                onChange={(e) => {
+                  // Basic live update of the string state. Robust masking is complex.
+                  setIncomeSourceAmount(e.target.value);
+                }}
+                onBlur={(e) => { // Format on blur to ensure correctness
                     const numericValue = parseCurrency(e.target.value);
                     setIncomeSourceAmount(formatCurrency(numericValue));
                 }}
@@ -957,3 +1022,4 @@ export default function HomePage() {
     </div>
   );
 }
+
