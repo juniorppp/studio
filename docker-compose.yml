@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  bill-bliss-app:
+    container_name: bill_bliss_container # Optional: give your container a specific name
+    image: bill-bliss-app-image # Optional: define an image name
+    build:
+      context: . # Use the current directory as the build context
+      dockerfile: Dockerfile # Specify the Dockerfile name
+    ports:
+      - "3000:3000" # Map port 3000 on your server to port 3000 in the container
+    restart: always # Or 'unless-stopped'
+    # If your application requires environment variables (e.g., API keys from a .env file),
+    # you can manage them here. Create a .env file in the same directory as this
+    # docker-compose.yml file on your server.
+    # Example:
+    # env_file:
+    #   - .env
+    #
+    # Alternatively, define variables directly:
+    # environment:
+    #   - GOOGLE_API_KEY=your_google_api_key_here_on_the_server
+    #   - ANOTHER_VAR=another_value
+    #
+    # For Bill Bliss, if you use Genkit with Google AI, you might need GOOGLE_API_KEY.
+    # Make sure to set these variables securely on your server, not in your Git repository.
+
+networks:
+  default:
+    name: bill_bliss_network

@@ -1,0 +1,40 @@
+# Git files
+.git
+.gitignore
+
+# Node modules
+node_modules
+
+# Next.js build outputs (local)
+.next
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Log files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment files (should be managed on the server, not in the image)
+.env
+.env*.local
+.env.development
+.env.production
+*.env
+
+# VSCode specific
+.vscode
+
+# IDE specific
+.idea
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+
+# Package archives
+*.tgz
