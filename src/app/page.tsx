@@ -22,6 +22,7 @@ import { siteConfig } from '@/config/site';
 import { useToast } from "@/hooks/use-toast";
 import { useLocalization } from '@/hooks/use-localization';
 import { format, getYear, getMonth, subYears, addYears } from 'date-fns';
+import { enUS, ptBR } from 'date-fns/locale';
 
 
 const LOCAL_STORAGE_KEY = 'billBlissData';
@@ -34,13 +35,13 @@ const PREDEFINED_BILLS_CONFIG: BillConfig[] = [
 ];
 
 const generateMonthOptions = (t: (key: string) => string, currentLocale: Locale) => {
-  const formatPattern = currentLocale === 'pt' ? 'MMMM' : 'MMMM'; // date-fns uses LLLL for standalone month name with correct casing
+  const formatPattern = 'LLLL'; // Use LLLL for standalone month name with correct casing
   return Array.from({ length: 12 }, (_, i) => {
     // Create a date for the first day of each month to format it
     const date = new Date(2000, i, 1); // Year doesn't matter, only month
     return {
       value: (i + 1).toString(),
-      label: format(date, formatPattern, { locale: currentLocale === 'pt' ? require('date-fns/locale/pt-BR') : require('date-fns/locale/en-US') }),
+      label: format(date, formatPattern, { locale: currentLocale === 'pt' ? ptBR : enUS }),
     };
   });
 };
@@ -200,7 +201,7 @@ export default function HomePage() {
     if (currentMonthlyData && currentMonthlyData.income !== income) {
       setCurrentMonthlyData(prev => prev ? { ...prev, income } : null);
     }
-  }, [income]);
+  }, [income, currentMonthlyData]); // Added currentMonthlyData to deps
 
   // Update currentMonthlyData when bills state changes
   useEffect(() => {
@@ -216,7 +217,7 @@ export default function HomePage() {
              setCurrentMonthlyData(prev => prev ? { ...prev, bills: storedBillsData } : null);
         }
     }
-  }, [bills]);
+  }, [bills, currentMonthlyData]); // Added currentMonthlyData to deps
 
 
   // Update bill names and income display if locale changes (or initial load)
@@ -244,29 +245,37 @@ export default function HomePage() {
   };
   
   const handleBillAmountDisplayChange = (billId: string, displayValue: string) => {
-    const numericAmount = parseCurrency(displayValue); // Parse immediately
+    // Update the bill's amount as a numeric value.
+    // The input field will temporarily show the raw input.
+    // On blur, it will be formatted.
     setBills(prevBills =>
       prevBills.map(bill =>
-        bill.id === billId ? { ...bill, amount: numericAmount } : bill // Store numeric amount
+        bill.id === billId ? { ...bill, amount: parseCurrency(displayValue) } : bill
       )
     );
   };
 
   const handleBillAmountInputBlur = (billId: string, displayValue: string) => {
-    const numericAmount = parseCurrency(displayValue);
-    // Find the bill and update its displayAmount after formatting
-    // This is mostly for visual consistency, the actual amount is already numeric in `bills` state.
+    // This function is now mainly to ensure the displayed value in the input
+    // is correctly formatted after the user finishes editing.
+    // The actual numeric amount is already updated by handleBillAmountDisplayChange.
+    // We find the bill in the *current* state to get its numeric amount for re-formatting.
     const billToUpdate = bills.find(b => b.id === billId);
     if (billToUpdate) {
-        // To refresh the input field with formatted value if necessary
-        const formatted = formatCurrency(numericAmount);
-        const inputElement = document.getElementById(billId) as HTMLInputElement;
-        if (inputElement && inputElement.value !== formatted) {
-            // This direct DOM manipulation is tricky with React.
-            // Better to rely on React's rendering.
-            // The main thing is that `bills` state holds the numeric value.
-        }
+        // Re-format the numeric amount from the state and update the input field's value.
+        // This requires managing the input field's value directly or ensuring React re-renders it.
+        // For simplicity, we'll rely on React re-rendering based on the `bills` state.
+        // The `value` prop of the Input component for bills already uses `formatCurrency(bill.amount)`.
+        // So, when `bills` state is updated with the parsed numeric value,
+        // React will re-render the Input with the correctly formatted currency string.
+        // This effect might be slightly delayed if parsing/formatting is slow, but generally okay.
     }
+     // To ensure the input field re-renders with the formatted value from state
+     // after blur, we can trigger a state update on the bills array if needed,
+     // or rely on the fact that the value prop of the Input is bound to formatCurrency(bill.amount).
+     // Forcing a re-render explicitly might be:
+     // setBills(prevBills => [...prevBills]); 
+     // But this is often not necessary if the value prop is correctly bound.
   };
 
 
@@ -657,3 +666,5 @@ export default function HomePage() {
     </div>
   );
 }
+
+    
