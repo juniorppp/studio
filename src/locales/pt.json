@@ -44,6 +44,8 @@
   "home.bills.deleteBillLabel": "Excluir Conta",
   "home.bills.toast.replicated.title": "Conta Replicada",
   "home.bills.toast.replicated.description": "\"{billName}\" foi replicada para {nextMonth}/{nextYear}.",
+  "home.bills.tooltip.replicateBill": "Replicar para o Próximo Mês",
+  "home.bills.tooltip.deleteBill": "Excluir Conta",
   "home.addBillButton": "Adicionar Nova Conta",
   "home.addBillModal.title": "Adicionar Nova Conta",
   "home.addBillModal.nameLabel": "Nome da Conta",

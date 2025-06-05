@@ -44,6 +44,8 @@
   "home.bills.deleteBillLabel": "Delete Bill",
   "home.bills.toast.replicated.title": "Bill Replicated",
   "home.bills.toast.replicated.description": "\"{billName}\" has been replicated to {nextMonth}/{nextYear}.",
+  "home.bills.tooltip.replicateBill": "Replicate to Next Month",
+  "home.bills.tooltip.deleteBill": "Delete Bill",
   "home.addBillButton": "Add New Bill",
   "home.addBillModal.title": "Add New Bill",
   "home.addBillModal.nameLabel": "Bill Name",

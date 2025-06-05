@@ -13,6 +13,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { PieChart as ChartIcon, Droplet, Zap, Wifi, Home, DollarSign, LineChart, AlertCircle, Loader2, Brain, Settings as SettingsIcon, Receipt, PlusCircle, CalendarDays, Edit3, Trash2, Landmark, ArrowRightCircle } from 'lucide-react';
 import { Pie, PieChart, Cell, Legend, ResponsiveContainer } from 'recharts';
 import { ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from "@/components/ui/chart";
@@ -209,11 +210,10 @@ export default function HomePage() {
         year: selectedYear,
         month: selectedMonth,
         incomeSources: resolvedIncomeSources,
-        bills: constructedBillsData, // Will be de-duplicated below before actual use
+        bills: constructedBillsData,
       };
     } else {
       // Month data exists, merge and ensure integrity
-      // Income Sources
       resolvedIncomeSources.push(...existingMonthData.incomeSources);
       if (resolvedIncomeSources.length === 0 && (appStorage.defaultIncome || 0) > 0) {
         const primaryIncomeName = appStorage.defaultIncomeSourceName?.trim()
@@ -224,41 +224,45 @@ export default function HomePage() {
           name: primaryIncomeName,
           amount: appStorage.defaultIncome || 0
         });
+      } else if (resolvedIncomeSources.length > 0 && !resolvedIncomeSources.some(s => s.id.startsWith('primary-'))) {
+        // If there are income sources, but none look like the primary one (e.g., from older data or all deleted)
+        // AND default income is set, consider re-adding it. This helps ensure primary is always present if configured.
+        if ((appStorage.defaultIncome || 0) > 0) {
+            const primaryIncomeName = appStorage.defaultIncomeSourceName?.trim()
+            ? appStorage.defaultIncomeSourceName
+            : t('home.incomeSources.defaultPrimaryName');
+            resolvedIncomeSources.unshift({ // Add to the beginning
+                id: `primary-${selectedYear}-${selectedMonth}-${Date.now()}`,
+                name: primaryIncomeName,
+                amount: appStorage.defaultIncome || 0
+            });
+        }
       }
 
-      // Bills: Start with predefined, update from storage, add custom from storage
-      const predefinedBillConfigs = initializePredefinedBills(); // Fresh predefined structures
+
+      const predefinedBillConfigs = initializePredefinedBills(); 
       const storedBillsFromExistingMonth = existingMonthData.bills || [];
-      
       const processedPredefinedIds = new Set<string>();
 
-      // Ensure all predefined bills are present, updated from storage if possible
       predefinedBillConfigs.forEach(pbConfig => {
         const storedVersion = storedBillsFromExistingMonth.find(sb => sb.id === pbConfig.id && !sb.isCustom);
         if (storedVersion) {
-          constructedBillsData.push({ ...pbConfig, ...storedVersion }); // Use stored amount/incomeSourceId
+          constructedBillsData.push({ ...pbConfig, ...storedVersion }); 
         } else {
-          // If not in storage or stored as custom, use the fresh predefined bill
           constructedBillsData.push(pbConfig); 
         }
         processedPredefinedIds.add(pbConfig.id);
       });
 
-      // Add custom bills from storage, ensuring they aren't duplicates of predefined ones (by ID)
-      // and also ensuring no duplicate custom bill IDs among themselves if storage was corrupted.
       const customBillsFromStorage = storedBillsFromExistingMonth.filter(sb => sb.isCustom);
       customBillsFromStorage.forEach(customBill => {
-        if (!processedPredefinedIds.has(customBill.id)) { // Check it doesn't clash with a predefined ID
-          // Check if this custom bill's ID is already in constructedBillsData (from another custom bill)
+        if (!processedPredefinedIds.has(customBill.id)) { 
           if (!constructedBillsData.some(cb => cb.id === customBill.id)) {
              constructedBillsData.push(customBill);
           } else {
-            // This means monthData.bills had duplicate custom bills; skipping subsequent ones.
             console.warn(`Duplicate custom bill ID '${customBill.id}' found in storage for month ${selectedMonth}/${selectedYear}. Skipping subsequent occurrences.`);
           }
         } else {
-            // This custom bill from storage has an ID that clashes with a predefined bill.
-            // The predefined version (already in constructedBillsData) takes precedence.
             console.warn(`Custom bill from storage with ID '${customBill.id}' clashes with a predefined bill ID for month ${selectedMonth}/${selectedYear}. Ignoring stored custom version.`);
         }
       });
@@ -266,13 +270,17 @@ export default function HomePage() {
       finalMonthData = {
           ...existingMonthData,
           incomeSources: resolvedIncomeSources,
-          bills: constructedBillsData, // Will be de-duplicated below
+          bills: constructedBillsData,
       };
     }
     
-    // De-duplicate bills by ID right before setting states
     const uniqueStoredBills = Array.from(new Map(finalMonthData.bills.map(item => [item.id, item])).values());
     finalMonthData.bills = uniqueStoredBills;
+
+    // Ensure incomeSources also has unique IDs, primarily for the primary income source if re-added
+    const uniqueIncomeSources = Array.from(new Map(finalMonthData.incomeSources.map(item => [item.id, item])).values());
+    finalMonthData.incomeSources = uniqueIncomeSources;
+
 
     setCurrentMonthlyData(finalMonthData);
     setIncomeSources(finalMonthData.incomeSources);
@@ -728,74 +736,90 @@ export default function HomePage() {
               </CardTitle>
               <CardDescription>{t('home.billsCard.descriptionPeriod', { month: monthOptions.find(m=>m.value === selectedMonth.toString())?.label || '', year: selectedYear.toString() })}</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-1">
               {bills.map(bill => (
-                <div key={bill.id} className="grid grid-cols-[auto_1fr_auto_auto_auto_auto] items-center gap-x-3 gap-y-1 p-2 border-b last:border-b-0">
-                  <bill.icon className="h-6 w-6 text-accent flex-shrink-0 row-span-2" aria-hidden="true" />
-                  <Label htmlFor={`bill-name-${bill.id}`} className="flex-1 text-sm font-medium col-span-2">{bill.name}</Label>
-                   <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleReplicateBill(bill)}
-                      aria-label={t('home.bills.replicateBillLabel')}
-                      className="row-start-1 col-start-3 justify-self-end"
+                <div key={bill.id} className="flex items-center gap-3 p-3 border-b last:border-b-0 hover:bg-muted/50 transition-colors rounded-md -mx-3 px-3">
+                  <bill.icon className="h-7 w-7 text-accent flex-shrink-0"/>
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <p className="font-medium truncate text-card-foreground">{bill.name}</p>
+                    <Select
+                      value={bill.incomeSourceId || "unassigned"}
+                      onValueChange={(value) => handleBillIncomeSourceChange(bill.id, value)}
                     >
-                      <ArrowRightCircle className="h-4 w-4" />
-                    </Button>
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-destructive hover:text-destructive/90 hover:bg-destructive/10 row-start-1 col-start-4 justify-self-end"
-                        aria-label={t('home.bills.deleteBillLabel')}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>{t('home.deleteBillModal.title')}</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          {t('home.deleteBillModal.description', { billName: bill.name })}
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>{t('generic.cancel')}</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => handleDeleteBill(bill.id)} className="bg-destructive hover:bg-destructive/90">
-                          {t('generic.delete')}
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
+                      <SelectTrigger className="h-8 text-xs w-full max-w-[200px] sm:max-w-[250px]"> 
+                         <SelectValue placeholder={t('home.bills.unassignedIncomeSource')} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unassigned">{t('home.bills.unassignedIncomeSource')}</SelectItem>
+                        {incomeSources.length > 0 ? (
+                          incomeSources.map(source => (
+                            <SelectItem key={source.id} value={source.id}>{source.name}</SelectItem>
+                          ))
+                        ) : (
+                          <SelectItem value="no-sources" disabled>{t('home.bills.noIncomeSourcesAvailable')}</SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <Input
                     id={`bill-amount-${bill.id}`}
                     type="text" 
                     value={formatCurrency(bill.amount)}
                     onChange={(e) => handleBillAmountDisplayChange(bill.id, e.target.value)}
                     placeholder={formatCurrency(0)}
-                    className="w-28 text-right row-start-1 col-start-5" 
+                    className="w-28 text-right text-sm" 
                     aria-label={`${bill.name} ${t('home.addBillModal.amountLabel')}`}
                   />
-                  <Label htmlFor={`bill-source-${bill.id}`} className="text-xs text-muted-foreground col-start-2">{t('home.bills.assignIncomeSourceLabel')}:</Label>
-                  <Select
-                    value={bill.incomeSourceId || "unassigned"}
-                    onValueChange={(value) => handleBillIncomeSourceChange(bill.id, value)}
-                  >
-                    <SelectTrigger id={`bill-source-${bill.id}`} className="w-full col-start-3 col-span-3 text-xs h-8"> 
-                       <SelectValue placeholder={t('home.bills.unassignedIncomeSource')} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="unassigned">{t('home.bills.unassignedIncomeSource')}</SelectItem>
-                      {incomeSources.length > 0 ? (
-                        incomeSources.map(source => (
-                          <SelectItem key={source.id} value={source.id}>{source.name}</SelectItem>
-                        ))
-                      ) : (
-                        <SelectItem value="no-sources" disabled>{t('home.bills.noIncomeSourcesAvailable')}</SelectItem>
-                      )}
-                    </SelectContent>
-                  </Select>
+                  <div className="flex items-center">
+                    <TooltipProvider delayDuration={100}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                           <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleReplicateBill(bill)}
+                            aria-label={t('home.bills.tooltip.replicateBill')}
+                          >
+                            <ArrowRightCircle className="h-5 w-5"/>
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent><p>{t('home.bills.tooltip.replicateBill')}</p></TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <TooltipProvider delayDuration={100}>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="text-destructive hover:text-destructive/90 hover:bg-destructive/10"
+                                        aria-label={t('home.bills.tooltip.deleteBill')}
+                                    >
+                                        <Trash2 className="h-5 w-5"/>
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent><p>{t('home.bills.tooltip.deleteBill')}</p></TooltipContent>
+                            </Tooltip>
+                        </TooltipProvider>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>{t('home.deleteBillModal.title')}</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            {t('home.deleteBillModal.description', { billName: bill.name })}
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>{t('generic.cancel')}</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => handleDeleteBill(bill.id)} className="bg-destructive hover:bg-destructive/90">
+                            {t('generic.delete')}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
                 </div>
               ))}
                <Dialog open={isAddBillModalOpen} onOpenChange={setIsAddBillModalOpen}>
@@ -1068,4 +1092,3 @@ export default function HomePage() {
     </div>
   );
 }
-
