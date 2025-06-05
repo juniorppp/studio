@@ -127,12 +127,13 @@ export default function HomePage() {
           icon: config.icon,
         };
       }
-      console.warn(`Could not find config for predefined bill ID: ${storedBill.id}`);
+      // Fallback for potentially corrupted data or old predefined bills not in current config
+      // Treat as custom bill if config not found
       return {
         ...baseBill,
-        name: t('home.bills.customBillFallback'),
+        name: storedBill.name || t('home.bills.customBillFallback'), // Use stored name if exists, else fallback
         icon: Receipt,
-        isCustom: true,
+        isCustom: true, // Mark as custom since its original config is missing
       };
     }).filter(bill => bill !== null) as Bill[];
   }, [t]);
@@ -215,28 +216,27 @@ export default function HomePage() {
     } else {
       // Month data exists, merge and ensure integrity
       resolvedIncomeSources.push(...existingMonthData.incomeSources);
-      if (resolvedIncomeSources.length === 0 && (appStorage.defaultIncome || 0) > 0) {
+      // Ensure primary income source is present if defaultIncome is set and no primary exists
+      const hasPrimarySource = resolvedIncomeSources.some(s => s.id.startsWith('primary-'));
+      if (!hasPrimarySource && (appStorage.defaultIncome || 0) > 0) {
+          const primaryIncomeName = appStorage.defaultIncomeSourceName?.trim()
+              ? appStorage.defaultIncomeSourceName
+              : t('home.incomeSources.defaultPrimaryName');
+          resolvedIncomeSources.unshift({ // Add to the beginning to make it prominent
+              id: `primary-${selectedYear}-${selectedMonth}-${Date.now()}`,
+              name: primaryIncomeName,
+              amount: appStorage.defaultIncome || 0
+          });
+      } else if (resolvedIncomeSources.length === 0 && (appStorage.defaultIncome || 0) > 0) {
+        // Handle case where existingMonthData.incomeSources was empty array, but defaultIncome is set
         const primaryIncomeName = appStorage.defaultIncomeSourceName?.trim()
-          ? appStorage.defaultIncomeSourceName
-          : t('home.incomeSources.defaultPrimaryName');
-        resolvedIncomeSources.push({
-          id: `primary-${selectedYear}-${selectedMonth}-${Date.now()}`,
-          name: primaryIncomeName,
-          amount: appStorage.defaultIncome || 0
-        });
-      } else if (resolvedIncomeSources.length > 0 && !resolvedIncomeSources.some(s => s.id.startsWith('primary-'))) {
-        // If there are income sources, but none look like the primary one (e.g., from older data or all deleted)
-        // AND default income is set, consider re-adding it. This helps ensure primary is always present if configured.
-        if ((appStorage.defaultIncome || 0) > 0) {
-            const primaryIncomeName = appStorage.defaultIncomeSourceName?.trim()
             ? appStorage.defaultIncomeSourceName
             : t('home.incomeSources.defaultPrimaryName');
-            resolvedIncomeSources.unshift({ // Add to the beginning
-                id: `primary-${selectedYear}-${selectedMonth}-${Date.now()}`,
-                name: primaryIncomeName,
-                amount: appStorage.defaultIncome || 0
-            });
-        }
+        resolvedIncomeSources.push({
+            id: `primary-${selectedYear}-${selectedMonth}-${Date.now()}`,
+            name: primaryIncomeName,
+            amount: appStorage.defaultIncome || 0
+        });
       }
 
 
@@ -277,7 +277,6 @@ export default function HomePage() {
     const uniqueStoredBills = Array.from(new Map(finalMonthData.bills.map(item => [item.id, item])).values());
     finalMonthData.bills = uniqueStoredBills;
 
-    // Ensure incomeSources also has unique IDs, primarily for the primary income source if re-added
     const uniqueIncomeSources = Array.from(new Map(finalMonthData.incomeSources.map(item => [item.id, item])).values());
     finalMonthData.incomeSources = uniqueIncomeSources;
 
@@ -488,6 +487,16 @@ export default function HomePage() {
     const sourceToDelete = incomeSources.find(s => s.id === sourceId);
     if (!sourceToDelete) return;
 
+    // Prevent deletion of the primary income source if it's the only one and has a default amount
+    if (sourceToDelete.id.startsWith('primary-') && incomeSources.length === 1 && (appStorage?.defaultIncome || 0) > 0) {
+        toast({
+            variant: "destructive",
+            title: t('home.incomeSources.deleteConfirm.cannotDeletePrimaryTitle'),
+            description: t('home.incomeSources.deleteConfirm.cannotDeletePrimaryDescription')
+        });
+        return;
+    }
+    
     const updatedIncomeSources = incomeSources.filter(s => s.id !== sourceId);
     setIncomeSources(updatedIncomeSources);
 
@@ -544,10 +553,21 @@ export default function HomePage() {
       };
       newAllMonthlyData.push(nextMonthData);
     }
+    
+    const uniqueStoredBillsNextMonth = Array.from(new Map(nextMonthData.bills.map(item => [item.id, item])).values());
+    nextMonthData.bills = uniqueStoredBillsNextMonth;
+    
+    const newAllMonthlyDataWithoutDuplicates = newAllMonthlyData.map(monthEntry => {
+        if (monthEntry.year === nextYear && monthEntry.month === nextMonth) {
+            return nextMonthData;
+        }
+        return monthEntry;
+    });
+
 
     const updatedAppStorage: AppStorage = {
       ...appStorage,
-      allMonthlyData: newAllMonthlyData,
+      allMonthlyData: newAllMonthlyDataWithoutDuplicates,
     };
 
     setAppStorage(updatedAppStorage); 
@@ -1092,3 +1112,4 @@ export default function HomePage() {
     </div>
   );
 }
+
