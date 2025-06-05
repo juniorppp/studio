@@ -13,10 +13,14 @@ let mongoInitializationError: Error | null = null;
 
 if (!MONGODB_URI) {
   mongoInitializationError = new Error(
-    'CRITICAL: MONGODB_URI environment variable is not defined. MongoDB functionality will be disabled. Please define it in your .env.local or server environment.'
+    'CRITICAL: MONGODB_URI environment variable is not defined. MongoDB functionality will be disabled. Please ensure MONGODB_URI is correctly set in your .env.local file (in the project root) and RESTART your Next.js server.'
   );
   console.error("***********************************************************************************");
   console.error(mongoInitializationError.message);
+  console.error("The value received for MONGODB_URI was:", MONGODB_URI);
+  console.error("Example .env.local content: ");
+  console.error("MONGODB_URI=\"mongodb://username:password@host:port/database?options\"");
+  console.error("MONGODB_DB_NAME=\"your_database_name\"");
   console.error("***********************************************************************************");
 } else {
   // @ts-ignore
@@ -30,26 +34,22 @@ if (!MONGODB_URI) {
         client = new MongoClient(MONGODB_URI);
         globalWithMongo._mongoClientPromise = client.connect();
       } catch (e: any) {
-        mongoInitializationError = new Error(`Failed to initialize MongoDB client in development: ${e.message}`);
+        mongoInitializationError = new Error(`Failed to initialize MongoDB client in development: ${e.message}. Check your MONGODB_URI.`);
         console.error(mongoInitializationError.message);
       }
     }
     if (globalWithMongo._mongoClientPromise && !mongoInitializationError) {
       clientPromise = globalWithMongo._mongoClientPromise;
     } else if (!mongoInitializationError) {
-        // This case should ideally not be hit if the above logic is correct
-        mongoInitializationError = new Error('MongoDB client promise was not initialized in development without a specific error.');
+        mongoInitializationError = new Error('MongoDB client promise was not initialized in development without a specific error. This could be due to an invalid MONGODB_URI even if it is defined.');
         console.error(mongoInitializationError.message);
     }
   } else {
-    // In production mode, it's best to not use a global variable for the promise itself,
-    // but the client can be managed if necessary. For simplicity, new client per call if not careful.
-    // A better production pattern involves a dedicated connection manager or ensuring client is reused.
     try {
       client = new MongoClient(MONGODB_URI);
       clientPromise = client.connect();
     } catch (e: any) {
-      mongoInitializationError = new Error(`Failed to initialize MongoDB client in production: ${e.message}`);
+      mongoInitializationError = new Error(`Failed to initialize MongoDB client in production: ${e.message}. Check your MONGODB_URI.`);
       console.error(mongoInitializationError.message);
     }
   }
@@ -60,16 +60,13 @@ async function getDb() {
     throw mongoInitializationError;
   }
   if (!clientPromise) {
-    // This should ideally be caught by mongoInitializationError if URI was missing,
-    // or if MongoClient constructor failed.
-    throw new Error('MongoDB client promise is not available. Initialization may have failed.');
+    throw new Error('MongoDB client promise is not available. Initialization may have failed, potentially due to an invalid MONGODB_URI.');
   }
   try {
     const mongoClient = await clientPromise;
     return mongoClient.db(DB_NAME);
   } catch (e: any) {
-    // Catch connection errors from clientPromise itself
-    const connectionError = new Error(`Failed to connect to MongoDB: ${e.message}`);
+    const connectionError = new Error(`Failed to connect to MongoDB: ${e.message}. Verify your MONGODB_URI, network access, and database server status.`);
     console.error(connectionError.message);
     throw connectionError;
   }
@@ -100,10 +97,6 @@ export async function saveMonthlyData(data: Omit<MonthlyData, '_id'> & { _id?: s
     const { year, month, _id, ...updateData } = data;
 
     const filter = { year, month };
-    // If _id is provided from an existing document, ensure we use it for targeting if appropriate,
-    // or rely on year/month for upsert. For simplicity, upsert on year/month is robust.
-    // If a new doc, _id will be undefined. If existing, it's passed from currentMonthlyData.
-    // For an upsert, we generally don't filter by _id but by a business key.
 
     const result = await db.collection(MONTHLY_DATA_COLLECTION).findOneAndUpdate(
       filter,
@@ -112,21 +105,19 @@ export async function saveMonthlyData(data: Omit<MonthlyData, '_id'> & { _id?: s
     );
 
     if (!result) {
-      // findOneAndUpdate with upsert:true and returnDocument:'after' should return the doc
-      throw new Error('Failed to save or update monthly data: No document returned from findOneAndUpdate.');
+      throw new Error('Failed to save or update monthly data: No document returned from findOneAndUpdate. This may indicate a problem with the database operation or connection.');
     }
     
-    // The result object from findOneAndUpdate in newer driver versions is the document itself.
-    const savedDoc = result as unknown as (MonthlyData & {_id: ObjectId}); // Cast needed as driver result type is generic
+    const savedDoc = result as unknown as (MonthlyData & {_id: ObjectId}); 
     
     if (savedDoc && savedDoc._id) {
       return { ...savedDoc, _id: savedDoc._id.toString() };
     }
-    // This path should ideally not be reached if result is not null.
-    throw new Error('Saved document is missing _id after database operation.');
+    throw new Error('Saved document is missing _id after database operation. This should not happen if the upsert was successful.');
 
   } catch (error: any) {
     console.error('Error saving monthly data:', error.message);
-    throw new Error(`Failed to save monthly data: ${error.message}. Ensure MongoDB is connected and credentials are correct.`);
+    throw new Error(`Failed to save monthly data: ${error.message}. Ensure MongoDB is connected, credentials in MONGODB_URI are correct, and the database server is accessible.`);
   }
 }
+
