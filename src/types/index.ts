@@ -24,8 +24,20 @@ export interface StoredBillData {
   isCustom?: boolean;
 }
 
-export interface FinancialData {
+// Represents data for a specific month and year
+export interface MonthlyData {
+  year: number;
+  month: number; // 1 for January, 12 for December
   income: number;
   bills: StoredBillData[];
-  language?: string;
+  // insights?: string; // Optional: store insights per month in the future
+}
+
+export type Locale = 'en' | 'pt';
+
+// New structure for data stored in localStorage
+export interface AppStorage {
+  userLocale: Locale;
+  defaultIncome?: number; // Default income for new months, set from settings
+  allMonthlyData: MonthlyData[]; // Array of all monthly financial records
 }

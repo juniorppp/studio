@@ -8,37 +8,39 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DollarSign, Languages, Save, Loader2 } from 'lucide-react';
-import type { FinancialData, StoredBillData } from '@/types';
+import type { AppStorage, Locale } from '@/types';
 import { useToast } from "@/hooks/use-toast";
 import { useLocalization } from '@/hooks/use-localization';
 
 const LOCAL_STORAGE_KEY = 'billBlissData';
 
 export default function SettingsPage() {
-  const { t, locale, setLocale, formatCurrency, parseCurrency, getLocale } = useLocalization();
-  const [income, setIncome] = useState<number>(0);
-  const [currentLanguage, setCurrentLanguage] = useState<string>(locale);
-  const [isClient, setIsClient] = useState(false);
-  const [localIncomeDisplay, setLocalIncomeDisplay] = useState('');
-
+  const { t, locale, setLocale: setGlobalLocale, formatCurrency, parseCurrency, getLocale } = useLocalization();
   const { toast } = useToast();
+
+  const [isClient, setIsClient] = useState(false);
+  const [defaultIncome, setDefaultIncome] = useState<number>(0);
+  const [localDefaultIncomeDisplay, setLocalDefaultIncomeDisplay] = useState('');
+  const [currentLanguage, setCurrentLanguage] = useState<Locale>(locale);
+
 
   useEffect(() => {
     setIsClient(true);
-    setCurrentLanguage(getLocale());
+    setCurrentLanguage(getLocale()); // Initialize with current global locale
     try {
-      const storedData = localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (storedData) {
-        const parsedData: FinancialData = JSON.parse(storedData);
-        const loadedIncome = parsedData.income || 0;
-        setIncome(loadedIncome);
-        setLocalIncomeDisplay(formatCurrency(loadedIncome));
-        if (parsedData.language && (parsedData.language === 'en' || parsedData.language === 'pt')) {
-          // setLocale(parsedData.language); // Already handled by LocalizationProvider
-          setCurrentLanguage(parsedData.language);
+      const storedDataString = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (storedDataString) {
+        const parsedAppStorage: AppStorage = JSON.parse(storedDataString);
+        const loadedDefaultIncome = parsedAppStorage.defaultIncome || 0;
+        setDefaultIncome(loadedDefaultIncome);
+        setLocalDefaultIncomeDisplay(formatCurrency(loadedDefaultIncome));
+        
+        // Language is already handled by LocalizationProvider, but we sync currentLanguage state
+        if (parsedAppStorage.userLocale && (parsedAppStorage.userLocale === 'en' || parsedAppStorage.userLocale === 'pt')) {
+          setCurrentLanguage(parsedAppStorage.userLocale);
         }
       } else {
-        setLocalIncomeDisplay(formatCurrency(0));
+        setLocalDefaultIncomeDisplay(formatCurrency(0));
       }
     } catch (error) {
       console.error("Failed to load data from localStorage:", error);
@@ -47,63 +49,62 @@ export default function SettingsPage() {
         title: t('toast.errorLoadingSettings.title'),
         description: t('toast.errorLoadingSettings.description'),
       });
-      setLocalIncomeDisplay(formatCurrency(0));
+      setLocalDefaultIncomeDisplay(formatCurrency(0));
     }
-  }, [toast, t, formatCurrency, getLocale]);
+  }, [toast, t, formatCurrency, getLocale]); // getLocale is stable
 
   useEffect(() => {
-    // Update display when locale changes (e.g. currency format)
-    setLocalIncomeDisplay(formatCurrency(income));
-    setCurrentLanguage(getLocale());
-  }, [locale, income, formatCurrency, getLocale]);
+    // Update display when locale changes (e.g. currency format) or defaultIncome changes
+    setLocalDefaultIncomeDisplay(formatCurrency(defaultIncome));
+    setCurrentLanguage(getLocale()); // Keep currentLanguage state synced with global locale
+  }, [locale, defaultIncome, formatCurrency, getLocale]);
 
 
-  const handleIncomeInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const displayValue = event.target.value;
-    setLocalIncomeDisplay(displayValue); // Keep the raw input for display
-    
-    // Attempt to parse, but only update state on blur or save to avoid weird reformatting during typing
-    // const numericValue = parseCurrency(displayValue);
-    // setIncome(numericValue); // This would update too aggressively
+  const handleDefaultIncomeInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setLocalDefaultIncomeDisplay(event.target.value);
   };
 
-  const handleIncomeInputBlur = () => {
-    const numericValue = parseCurrency(localIncomeDisplay);
-    setIncome(numericValue);
-    setLocalIncomeDisplay(formatCurrency(numericValue)); // Reformat to canonical
+  const handleDefaultIncomeInputBlur = () => {
+    const numericValue = parseCurrency(localDefaultIncomeDisplay);
+    setDefaultIncome(numericValue);
+    setLocalDefaultIncomeDisplay(formatCurrency(numericValue)); 
   };
 
   const handleLanguageChange = (value: string) => {
     if (value === 'en' || value === 'pt') {
-      setLocale(value);
-      setCurrentLanguage(value);
-      toast({
-        title: t('toast.languageUpdated.title'),
-        description: value === 'pt' ? "O idioma foi definido para Português." : "Language has been set to English.",
-      });
+      const newLocale = value as Locale;
+      setGlobalLocale(newLocale); // Update global locale via context
+      setCurrentLanguage(newLocale); // Update local state for the Select component
+      // Toast is now handled by setGlobalLocale in LocalizationContext if it shows one
     }
   };
 
   const handleSaveChanges = useCallback(() => {
     if (!isClient) return;
     try {
-      // Final parse before saving
-      const numericIncome = parseCurrency(localIncomeDisplay);
-      setIncome(numericIncome); // Ensure income state is the numeric value
-      setLocalIncomeDisplay(formatCurrency(numericIncome)); // And display is formatted
+      const numericDefaultIncome = parseCurrency(localDefaultIncomeDisplay);
+      // We update defaultIncome state here to ensure it's numeric before saving
+      setDefaultIncome(numericDefaultIncome); 
+      setLocalDefaultIncomeDisplay(formatCurrency(numericDefaultIncome));
 
-      const storedData = localStorage.getItem(LOCAL_STORAGE_KEY);
-      let currentData: FinancialData;
-      if (storedData) {
-        currentData = JSON.parse(storedData);
+      const storedDataString = localStorage.getItem(LOCAL_STORAGE_KEY);
+      let currentAppStorage: AppStorage;
+
+      if (storedDataString) {
+        currentAppStorage = JSON.parse(storedDataString);
       } else {
-        currentData = { income: numericIncome, bills: [], language: getLocale() };
+        // Initialize if somehow not present
+        currentAppStorage = {
+          userLocale: getLocale(),
+          defaultIncome: numericDefaultIncome,
+          allMonthlyData: [],
+        };
       }
       
-      currentData.income = numericIncome;
-      currentData.language = getLocale();
+      currentAppStorage.defaultIncome = numericDefaultIncome;
+      currentAppStorage.userLocale = getLocale(); // Use the globally set locale
 
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(currentData));
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(currentAppStorage));
       toast({
         title: t('toast.settingsSaved.title'),
         description: t('toast.settingsSaved.description'),
@@ -116,7 +117,7 @@ export default function SettingsPage() {
         description: t('toast.errorSavingSettings.description'),
       });
     }
-  }, [isClient, toast, t, getLocale, parseCurrency, formatCurrency, localIncomeDisplay]);
+  }, [isClient, toast, t, getLocale, parseCurrency, formatCurrency, localDefaultIncomeDisplay, setGlobalLocale]);
 
   if (!isClient) {
     return (
@@ -143,21 +144,21 @@ export default function SettingsPage() {
           <CardHeader>
             <CardTitle className="flex items-center text-xl font-headline">
               <DollarSign className="mr-2 h-6 w-6 text-primary" />
-              {t('settings.incomeCard.title')}
+              {t('settings.defaultIncomeCard.title')}
             </CardTitle>
-            <CardDescription>{t('settings.incomeCard.description')}</CardDescription>
+            <CardDescription>{t('settings.defaultIncomeCard.description')}</CardDescription>
           </CardHeader>
           <CardContent>
-            <Label htmlFor="income" className="text-sm font-medium">{t('settings.incomeCard.label')}</Label>
+            <Label htmlFor="defaultIncome" className="text-sm font-medium">{t('settings.defaultIncomeCard.label')}</Label>
             <Input
-              id="income"
-              type="text" // Use text for formatted input
-              value={localIncomeDisplay}
-              onChange={handleIncomeInputChange}
-              onBlur={handleIncomeInputBlur}
+              id="defaultIncome"
+              type="text"
+              value={localDefaultIncomeDisplay}
+              onChange={handleDefaultIncomeInputChange}
+              onBlur={handleDefaultIncomeInputBlur}
               placeholder={t('currency.placeholder', { exampleAmount: formatCurrency(3000)})}
               className="mt-1 text-lg"
-              aria-label={t('settings.incomeCard.label')}
+              aria-label={t('settings.defaultIncomeCard.label')}
             />
           </CardContent>
         </Card>

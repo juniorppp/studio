@@ -11,13 +11,18 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
-import { Droplet, Zap, Wifi, Home, DollarSign, LineChart, AlertCircle, Loader2, Brain, Settings as SettingsIcon, Receipt, PlusCircle } from 'lucide-react';
-import type { Bill, FinancialData, BillConfig, StoredBillData } from '@/types';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { PieChart as ChartIcon, Droplet, Zap, Wifi, Home, DollarSign, LineChart, AlertCircle, Loader2, Brain, Settings as SettingsIcon, Receipt, PlusCircle, CalendarDays } from 'lucide-react';
+import { BarChart, Pie, PieChart, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from "@/components/ui/chart";
+import type { Bill, BillConfig, StoredBillData, MonthlyData, AppStorage, Locale } from '@/types';
 import { getSpendingInsights } from '@/ai/flows/spending-insights';
 import type { SpendingInsightsInput, SpendingInsightsOutput } from '@/ai/flows/spending-insights';
 import { siteConfig } from '@/config/site';
 import { useToast } from "@/hooks/use-toast";
 import { useLocalization } from '@/hooks/use-localization';
+import { format, getYear, getMonth, subYears, addYears } from 'date-fns';
+
 
 const LOCAL_STORAGE_KEY = 'billBlissData';
 
@@ -28,20 +33,54 @@ const PREDEFINED_BILLS_CONFIG: BillConfig[] = [
   { id: 'rent', nameKey: 'home.bills.rent', defaultName: 'Rent / Mortgage', icon: Home },
 ];
 
+const generateMonthOptions = (t: (key: string) => string, currentLocale: Locale) => {
+  const formatPattern = currentLocale === 'pt' ? 'MMMM' : 'MMMM'; // date-fns uses LLLL for standalone month name with correct casing
+  return Array.from({ length: 12 }, (_, i) => {
+    // Create a date for the first day of each month to format it
+    const date = new Date(2000, i, 1); // Year doesn't matter, only month
+    return {
+      value: (i + 1).toString(),
+      label: format(date, formatPattern, { locale: currentLocale === 'pt' ? require('date-fns/locale/pt-BR') : require('date-fns/locale/en-US') }),
+    };
+  });
+};
+
+const generateYearOptions = () => {
+  const currentYr = getYear(new Date());
+  const years = [];
+  for (let i = -5; i <= 1; i++) { // 5 years past, current year, 1 year future
+    years.push({ value: (currentYr + i).toString(), label: (currentYr + i).toString() });
+  }
+  return years;
+};
+
 export default function HomePage() {
   const { t, formatCurrency, parseCurrency, getLocale, locale } = useLocalization();
+  const { toast } = useToast();
+
+  const [isClient, setIsClient] = useState(false);
+  const [appStorage, setAppStorage] = useState<AppStorage | null>(null);
+
+  const [selectedYear, setSelectedYear] = useState<number>(getYear(new Date()));
+  const [selectedMonth, setSelectedMonth] = useState<number>(getMonth(new Date()) + 1); // 1-12
+
+  const [currentMonthlyData, setCurrentMonthlyData] = useState<MonthlyData | null>(null);
+  
+  // Derived state for UI: income and bills for the selected period
   const [income, setIncome] = useState<number>(0);
   const [localIncomeDisplay, setLocalIncomeDisplay] = useState('');
   const [bills, setBills] = useState<Bill[]>([]);
+
   const [insights, setInsights] = useState<string | null>(null);
   const [isLoadingInsights, setIsLoadingInsights] = useState<boolean>(false);
   const [errorInsights, setErrorInsights] = useState<string | null>(null);
-  const [isClient, setIsClient] = useState(false);
-  const { toast } = useToast();
 
   const [isAddBillModalOpen, setIsAddBillModalOpen] = useState(false);
   const [newBillName, setNewBillName] = useState('');
   const [newBillAmount, setNewBillAmount] = useState('');
+  
+  const yearOptions = useMemo(() => generateYearOptions(), []);
+  const monthOptions = useMemo(() => generateMonthOptions(t, locale), [t, locale]);
 
 
   const mapStoredDataToBills = useCallback((storedBills: StoredBillData[]): Bill[] => {
@@ -49,8 +88,8 @@ export default function HomePage() {
       if (storedBill.isCustom) {
         return {
           id: storedBill.id,
-          name: storedBill.name || 'Custom Bill', // Fallback name
-          icon: Receipt, // Generic icon for custom bills
+          name: storedBill.name || t('home.bills.customBillFallback'),
+          icon: Receipt,
           amount: storedBill.amount || 0,
           isCustom: true,
         };
@@ -66,40 +105,35 @@ export default function HomePage() {
           isCustom: false,
         };
       }
-      return null; // Should not happen if data is consistent
+      return null; 
     }).filter(bill => bill !== null) as Bill[];
   }, [t]);
   
-  const initializeBills = useCallback(() => {
+  const initializePredefinedBills = useCallback((): StoredBillData[] => {
     return PREDEFINED_BILLS_CONFIG.map(config => ({
       id: config.id,
-      name: t(config.nameKey) || config.defaultName,
-      nameKey: config.nameKey,
-      icon: config.icon,
       amount: 0,
       isCustom: false,
     }));
-  }, [t]);
+  }, []);
 
-
+  // Load all data from localStorage on client mount
   useEffect(() => {
     setIsClient(true);
     try {
-      const storedData = localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (storedData) {
-        const parsedData: FinancialData = JSON.parse(storedData);
-        const loadedIncome = parsedData.income || 0;
-        setIncome(loadedIncome);
-        setLocalIncomeDisplay(formatCurrency(loadedIncome));
-        
-        if (parsedData.bills && parsedData.bills.length > 0) {
-          setBills(mapStoredDataToBills(parsedData.bills));
-        } else {
-          setBills(initializeBills());
-        }
+      const storedDataString = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (storedDataString) {
+        const parsedAppStorage: AppStorage = JSON.parse(storedDataString);
+        setAppStorage(parsedAppStorage);
       } else {
-        setLocalIncomeDisplay(formatCurrency(0));
-        setBills(initializeBills());
+        // Initialize AppStorage if nothing is in localStorage
+        const initialStorage: AppStorage = {
+          userLocale: getLocale(),
+          defaultIncome: 0,
+          allMonthlyData: [],
+        };
+        setAppStorage(initialStorage);
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(initialStorage));
       }
     } catch (error) {
       console.error("Failed to load data from localStorage:", error);
@@ -108,42 +142,96 @@ export default function HomePage() {
         title: t('toast.errorLoadingData.title'),
         description: t('toast.errorLoadingData.description'),
       });
-      setLocalIncomeDisplay(formatCurrency(0));
-      setBills(initializeBills());
+      const fallbackStorage: AppStorage = { userLocale: getLocale(), defaultIncome: 0, allMonthlyData: [] };
+      setAppStorage(fallbackStorage);
     }
-  }, [toast, t, formatCurrency, mapStoredDataToBills, initializeBills]);
-
+  }, [toast, t, getLocale]);
+  
+  // Effect to load/initialize data for the selectedYear and selectedMonth
   useEffect(() => {
-    // Update bill names and income display if locale changes
-    setBills(currentBills => currentBills.map(bill => ({
-      ...bill,
-      name: bill.isCustom ? bill.name : (t(bill.nameKey || '') || PREDEFINED_BILLS_CONFIG.find(pb => pb.id === bill.id)?.defaultName || 'Bill')
-    })));
-    setLocalIncomeDisplay(formatCurrency(income));
-  }, [t, income, formatCurrency]);
+    if (!isClient || !appStorage) return;
 
+    let monthData = appStorage.allMonthlyData.find(
+      (data) => data.year === selectedYear && data.month === selectedMonth
+    );
 
+    if (!monthData) {
+      // Create new monthly data if it doesn't exist
+      monthData = {
+        year: selectedYear,
+        month: selectedMonth,
+        income: appStorage.defaultIncome || 0,
+        bills: initializePredefinedBills(),
+      };
+      // No need to push to appStorage here, will be handled by save logic
+    }
+    
+    setCurrentMonthlyData(monthData);
+    setIncome(monthData.income);
+    setLocalIncomeDisplay(formatCurrency(monthData.income));
+    setBills(mapStoredDataToBills(monthData.bills));
+    setInsights(null); // Clear insights when period changes
+    setErrorInsights(null);
+
+  }, [isClient, appStorage, selectedYear, selectedMonth, initializePredefinedBills, mapStoredDataToBills, formatCurrency]);
+
+  // Effect to save data to localStorage when currentMonthlyData changes
   useEffect(() => {
-    if (isClient) {
-      try {
+    if (!isClient || !appStorage || !currentMonthlyData) return;
+
+    const updatedAllMonthlyData = appStorage.allMonthlyData.filter(
+      (data) => !(data.year === currentMonthlyData.year && data.month === currentMonthlyData.month)
+    );
+    updatedAllMonthlyData.push(currentMonthlyData);
+
+    const newAppStorage: AppStorage = {
+      ...appStorage,
+      allMonthlyData: updatedAllMonthlyData,
+      userLocale: getLocale(), // Ensure locale is up-to-date
+    };
+    
+    setAppStorage(newAppStorage); // Update state first to avoid race conditions with display updates
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(newAppStorage));
+
+  }, [currentMonthlyData, isClient]); // Removed appStorage, getLocale from deps to simplify, rely on currentMonthlyData as trigger
+
+  // Update currentMonthlyData when income state changes
+  useEffect(() => {
+    if (currentMonthlyData && currentMonthlyData.income !== income) {
+      setCurrentMonthlyData(prev => prev ? { ...prev, income } : null);
+    }
+  }, [income]);
+
+  // Update currentMonthlyData when bills state changes
+  useEffect(() => {
+    if (currentMonthlyData) {
         const storedBillsData: StoredBillData[] = bills.map(bill => ({
           id: bill.id,
           amount: bill.amount,
           name: bill.isCustom ? bill.name : undefined,
           isCustom: bill.isCustom,
         }));
-        const dataToStore: FinancialData = { income, bills: storedBillsData, language: getLocale() };
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(dataToStore));
-      } catch (error) {
-        console.error("Failed to save data to localStorage:", error);
-         toast({
-          variant: "destructive",
-          title: t('toast.errorSavingData.title'),
-          description: t('toast.errorSavingData.description'),
-        });
-      }
+        // Deep comparison to avoid unnecessary updates
+        if (JSON.stringify(currentMonthlyData.bills) !== JSON.stringify(storedBillsData)) {
+             setCurrentMonthlyData(prev => prev ? { ...prev, bills: storedBillsData } : null);
+        }
     }
-  }, [income, bills, isClient, toast, t, getLocale]);
+  }, [bills]);
+
+
+  // Update bill names and income display if locale changes (or initial load)
+   useEffect(() => {
+    if (isClient) {
+        setBills(currentBills => currentBills.map(bill => ({
+          ...bill,
+          name: bill.isCustom ? bill.name : (t(bill.nameKey || '') || PREDEFINED_BILLS_CONFIG.find(pb => pb.id === bill.id)?.defaultName || t('home.bills.customBillFallback'))
+        })));
+        setLocalIncomeDisplay(formatCurrency(income)); // income is already numeric state
+        // Month options also need to be re-generated if locale changes for month names
+        // This is handled by monthOptions useMemo dependency on 'locale'
+    }
+  }, [t, locale, isClient, formatCurrency, income]);
+
 
   const handleIncomeInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setLocalIncomeDisplay(event.target.value);
@@ -151,17 +239,34 @@ export default function HomePage() {
 
   const handleIncomeInputBlur = () => {
     const numericValue = parseCurrency(localIncomeDisplay);
-    setIncome(numericValue);
+    setIncome(numericValue); // This will trigger the useEffect to update currentMonthlyData
     setLocalIncomeDisplay(formatCurrency(numericValue));
   };
   
   const handleBillAmountDisplayChange = (billId: string, displayValue: string) => {
-    const numericAmount = parseCurrency(displayValue);
+    const numericAmount = parseCurrency(displayValue); // Parse immediately
     setBills(prevBills =>
       prevBills.map(bill =>
-        bill.id === billId ? { ...bill, amount: numericAmount } : bill
+        bill.id === billId ? { ...bill, amount: numericAmount } : bill // Store numeric amount
       )
     );
+  };
+
+  const handleBillAmountInputBlur = (billId: string, displayValue: string) => {
+    const numericAmount = parseCurrency(displayValue);
+    // Find the bill and update its displayAmount after formatting
+    // This is mostly for visual consistency, the actual amount is already numeric in `bills` state.
+    const billToUpdate = bills.find(b => b.id === billId);
+    if (billToUpdate) {
+        // To refresh the input field with formatted value if necessary
+        const formatted = formatCurrency(numericAmount);
+        const inputElement = document.getElementById(billId) as HTMLInputElement;
+        if (inputElement && inputElement.value !== formatted) {
+            // This direct DOM manipulation is tricky with React.
+            // Better to rely on React's rendering.
+            // The main thing is that `bills` state holds the numeric value.
+        }
+    }
   };
 
 
@@ -174,11 +279,13 @@ export default function HomePage() {
   }, [income, totalExpenses]);
 
   const expenseRatio = useMemo(() => {
-    if (income === 0) return 0;
-    return Math.min(Math.max(0, (totalExpenses / income) * 100), 100); // Ensure ratio is between 0 and 100
+    if (income === 0 && totalExpenses === 0) return 0; // Avoid NaN if income is 0 but expenses also 0
+    if (income === 0) return totalExpenses > 0 ? 1000 : 0; // Represent very high ratio if income is 0 but expenses exist
+    return Math.min(Math.max(0, (totalExpenses / income) * 100), 1000); // Allow ratio > 100
   }, [income, totalExpenses]);
 
   const handleGenerateInsights = useCallback(async () => {
+    if (!currentMonthlyData) return;
     setIsLoadingInsights(true);
     setErrorInsights(null);
     setInsights(null);
@@ -187,14 +294,19 @@ export default function HomePage() {
     const languageForAI = currentLocale === 'pt' ? 'Portuguese' : 'English';
 
     const insightInput: SpendingInsightsInput = {
-      income,
-      expenses: bills.map(bill => ({ category: bill.name, amount: bill.amount })),
+      income: currentMonthlyData.income,
+      expenses: currentMonthlyData.bills.map(b => {
+          const billConfig = PREDEFINED_BILLS_CONFIG.find(pbc => pbc.id === b.id);
+          const name = b.isCustom ? b.name : (billConfig ? t(billConfig.nameKey) : t('home.bills.customBillFallback'));
+          return { category: name || t('home.bills.unknownCategory'), amount: b.amount };
+      }),
       language: languageForAI,
     };
 
     try {
       const result: SpendingInsightsOutput = await getSpendingInsights(insightInput);
       setInsights(result.insights);
+      // Optionally save insights to currentMonthlyData here if needed for persistence across sessions for the same month
     } catch (error) {
       console.error("Error fetching spending insights:", error);
       const errorMessage = t('toast.insightsFailed.description');
@@ -207,7 +319,7 @@ export default function HomePage() {
     } finally {
       setIsLoadingInsights(false);
     }
-  }, [income, bills, toast, t, getLocale]);
+  }, [currentMonthlyData, toast, t, getLocale]);
 
   const handleAddNewBill = () => {
     const parsedAmount = parseCurrency(newBillAmount);
@@ -227,14 +339,42 @@ export default function HomePage() {
       amount: parsedAmount,
       isCustom: true,
     };
-    setBills(prevBills => [...prevBills, newBill]);
+    setBills(prevBills => [...prevBills, newBill]); // This will trigger useEffect to save
     setNewBillName('');
     setNewBillAmount('');
     setIsAddBillModalOpen(false);
     toast({ title: t('home.addBillModal.toast.success.title'), description: t('home.addBillModal.toast.success.description', { billName: newBillName }) });
   };
+
+  const topExpenses = useMemo(() => {
+    return [...bills]
+      .filter(bill => bill.amount > 0)
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 3);
+  }, [bills]);
+
+  const chartData = useMemo(() => {
+    return bills
+      .filter(bill => bill.amount > 0)
+      .map((bill, index) => ({
+        name: bill.name,
+        value: bill.amount,
+        fill: `hsl(var(--chart-${(index % 5) + 1}))`, // Cycle through 5 chart colors
+      }));
+  }, [bills]);
+
+  const chartConfig = useMemo(() => {
+    const config: ChartConfig = {};
+    chartData.forEach(item => {
+      config[item.name] = {
+        label: item.name,
+        color: item.fill,
+      };
+    });
+    return config;
+  }, [chartData]);
   
-  if (!isClient) {
+  if (!isClient || !appStorage) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[calc(100vh-var(--header-height,56px))] p-4 sm:p-8 bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -250,7 +390,30 @@ export default function HomePage() {
           {t('home.welcome', { appName: siteConfig.name })}
         </h1>
         <p className="mt-3 text-xl text-muted-foreground font-headline">{t(siteConfig.descriptionKey)}</p>
-        <div className="mt-6">
+        <div className="mt-6 flex flex-col sm:flex-row justify-center items-center gap-4">
+          <div className="flex gap-2 items-center">
+            <CalendarDays className="h-5 w-5 text-muted-foreground" />
+            <Select value={selectedMonth.toString()} onValueChange={(value) => setSelectedMonth(parseInt(value))}>
+              <SelectTrigger className="w-[150px]">
+                <SelectValue placeholder={t('home.monthYearSelector.monthPlaceholder')} />
+              </SelectTrigger>
+              <SelectContent>
+                {monthOptions.map(option => (
+                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={selectedYear.toString()} onValueChange={(value) => setSelectedYear(parseInt(value))}>
+              <SelectTrigger className="w-[100px]">
+                <SelectValue placeholder={t('home.monthYearSelector.yearPlaceholder')} />
+              </SelectTrigger>
+              <SelectContent>
+                {yearOptions.map(option => (
+                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <Link href="/settings" passHref>
             <Button variant="outline">
               <SettingsIcon className="mr-2 h-4 w-4" />
@@ -260,15 +423,15 @@ export default function HomePage() {
         </div>
       </header>
 
-      <main className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="space-y-6">
+      <main className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 space-y-6"> {/* Bills and Income */}
           <Card className="shadow-lg hover:shadow-xl transition-shadow duration-300">
             <CardHeader>
               <CardTitle className="flex items-center text-2xl font-headline">
                 <DollarSign className="mr-2 h-7 w-7 text-primary" />
                 {t('home.incomeCard.title')}
               </CardTitle>
-              <CardDescription>{t('home.incomeCard.description')}</CardDescription>
+              <CardDescription>{t('home.incomeCard.descriptionPeriod', { month: monthOptions.find(m=>m.value === selectedMonth.toString())?.label || '', year: selectedYear.toString() })}</CardDescription>
             </CardHeader>
             <CardContent>
               <Label htmlFor="income" className="text-sm font-medium">{t('home.incomeCard.label')}</Label>
@@ -278,7 +441,7 @@ export default function HomePage() {
                 value={localIncomeDisplay}
                 onChange={handleIncomeInputChange}
                 onBlur={handleIncomeInputBlur}
-                placeholder={t('currency.placeholder', { exampleAmount: formatCurrency(3000)})}
+                placeholder={t('currency.placeholder', { exampleAmount: formatCurrency(appStorage?.defaultIncome || 3000)})}
                 className="mt-1 text-lg"
                 aria-label={t('home.incomeCard.label')}
               />
@@ -291,7 +454,7 @@ export default function HomePage() {
                 <LineChart className="mr-2 h-7 w-7 text-primary" />
                 {t('home.billsCard.title')}
               </CardTitle>
-              <CardDescription>{t('home.billsCard.description')}</CardDescription>
+              <CardDescription>{t('home.billsCard.descriptionPeriod', { month: monthOptions.find(m=>m.value === selectedMonth.toString())?.label || '', year: selectedYear.toString() })}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {bills.map(bill => (
@@ -303,14 +466,7 @@ export default function HomePage() {
                     type="text" 
                     value={formatCurrency(bill.amount)} 
                     onChange={(e) => handleBillAmountDisplayChange(bill.id, e.target.value)}
-                    onBlur={(e) => { // Re-format on blur to ensure consistency
-                        const numericAmount = parseCurrency(e.target.value);
-                        const formatted = formatCurrency(numericAmount);
-                         if (e.target.value !== formatted) { // Only update if formatting changed it
-                            e.target.value = formatted; // Visually update the input
-                            // State update happens in handleBillAmountDisplayChange
-                         }
-                    }}
+                    onBlur={(e) => handleBillAmountInputBlur(bill.id, e.target.value)}
                     placeholder={formatCurrency(0)}
                     className="w-32 text-right"
                     aria-label={`${bill.name} ${t('home.addBillModal.amountLabel')}`}
@@ -347,7 +503,7 @@ export default function HomePage() {
                         onChange={(e) => setNewBillAmount(e.target.value)} 
                         onBlur={(e) => {
                             const numericValue = parseCurrency(e.target.value);
-                            setNewBillAmount(formatCurrency(numericValue));
+                            setNewBillAmount(formatCurrency(numericValue)); // Display formatted
                         }}
                         placeholder={formatCurrency(0)}
                       />
@@ -363,11 +519,11 @@ export default function HomePage() {
           </Card>
         </div>
 
-        <div className="space-y-6">
+        <div className="space-y-6"> {/* Summary, Chart, Insights */}
           <Card className="shadow-lg hover:shadow-xl transition-shadow duration-300">
             <CardHeader>
               <CardTitle className="text-2xl font-headline">{t('home.summaryCard.title')}</CardTitle>
-              <CardDescription>{t('home.summaryCard.description')}</CardDescription>
+              <CardDescription>{t('home.summaryCard.descriptionPeriod', { month: monthOptions.find(m=>m.value === selectedMonth.toString())?.label || '', year: selectedYear.toString() })}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex justify-between items-center">
@@ -386,20 +542,58 @@ export default function HomePage() {
                 </span>
               </div>
               <div>
-                <Label className="text-xs text-muted-foreground">{t('home.summaryCard.expenseRatio', { ratio: expenseRatio.toFixed(0) })}</Label>
-                <Progress value={expenseRatio} className="w-full mt-1 h-3" indicatorClassName={expenseRatio > 80 ? "bg-destructive" : "bg-primary"} />
+                <Label className="text-xs text-muted-foreground">{t('home.summaryCard.expenseRatio', { ratio: expenseRatio > 1000 ? ">1000" : expenseRatio.toFixed(0) })}</Label>
+                <Progress value={Math.min(expenseRatio, 100)} className="w-full mt-1 h-3" indicatorClassName={expenseRatio > 80 ? "bg-destructive" : "bg-primary"} />
                  {expenseRatio > 100 && (
                     <p className="text-xs text-destructive mt-1 flex items-center">
                         <AlertCircle className="h-3 w-3 mr-1" />
                         {t('home.summaryCard.expensesExceedIncome')}
                     </p>
                 )}
-                 {income > 0 && expenseRatio === 0 && totalExpenses > 0 && (
-                     <p className="text-xs text-muted-foreground mt-1 flex items-center">
-                        {t('home.summaryCard.lowExpenseRatio')}
-                    </p>
-                 )}
               </div>
+              {topExpenses.length > 0 && (
+                <>
+                  <Separator />
+                  <div>
+                    <h4 className="text-sm font-medium mb-2">{t('home.summaryCard.topExpensesTitle')}</h4>
+                    <ul className="space-y-1">
+                      {topExpenses.map(expense => (
+                        <li key={expense.id} className="flex justify-between text-xs">
+                          <span>{expense.name}</span>
+                          <span className="font-medium">{formatCurrency(expense.amount)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+          
+          <Card className="shadow-lg hover:shadow-xl transition-shadow duration-300">
+            <CardHeader>
+              <CardTitle className="flex items-center text-2xl font-headline">
+                <ChartIcon className="mr-2 h-7 w-7 text-primary" />
+                {t('home.chartCard.title')}
+              </CardTitle>
+              <CardDescription>{t('home.chartCard.descriptionPeriod', { month: monthOptions.find(m=>m.value === selectedMonth.toString())?.label || '', year: selectedYear.toString() })}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {chartData.length > 0 ? (
+                <ChartContainer config={chartConfig} className="mx-auto aspect-square h-[250px] w-full">
+                  <PieChart>
+                    <ChartTooltip content={<ChartTooltipContent hideLabel />} />
+                    <Pie data={chartData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} labelLine={false} label={({ percent }) => `${(percent * 100).toFixed(0)}%`}>
+                      {chartData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.fill} />
+                      ))}
+                    </Pie>
+                    <ChartLegend content={<ChartLegendContent nameKey="name" />} />
+                  </PieChart>
+                </ChartContainer>
+              ) : (
+                <p className="text-sm text-muted-foreground text-center py-10">{t('home.chartCard.noData')}</p>
+              )}
             </CardContent>
           </Card>
 
