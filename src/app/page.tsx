@@ -11,10 +11,10 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { PieChart as ChartIcon, Droplet, Zap, Wifi, Home, DollarSign, LineChart, AlertCircle, Loader2, Brain, Settings as SettingsIcon, Receipt, PlusCircle, CalendarDays, Edit3, Trash2, Landmark, ArrowRightCircle } from 'lucide-react';
+import { PieChart as ChartIcon, Droplet, Zap, Wifi, Home, DollarSign, LineChart, AlertCircle, Loader2, Brain, Settings as SettingsIcon, Receipt, PlusCircle, CalendarDays, Edit3, Trash2, Landmark, ArrowRightCircle, PackagePlus } from 'lucide-react';
 import { Pie, PieChart, Cell, Legend, ResponsiveContainer } from 'recharts';
 import { ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from "@/components/ui/chart";
 import type { Bill, BillConfig, StoredBillData, MonthlyData, AppStorage, Locale, IncomeSource } from '@/types';
@@ -91,16 +91,27 @@ export default function HomePage() {
 
   const [isAddBillModalOpen, setIsAddBillModalOpen] = useState(false);
   const [newBillName, setNewBillName] = useState('');
-  const [newBillAmount, setNewBillAmount] = useState('');
+  const [newBillAmountRaw, setNewBillAmountRaw] = useState(''); // Stores raw input for amount
+  const [newBillIcon, setNewBillIcon] = useState<React.ElementType>(Receipt);
+  const [newBillIsCustom, setNewBillIsCustom] = useState(true);
+  const [newBillPredefinedId, setNewBillPredefinedId] = useState<string | null>(null);
   const [selectedIncomeSourceForNewBill, setSelectedIncomeSourceForNewBill] = useState<string | undefined>(undefined);
 
   const [isIncomeSourceModalOpen, setIsIncomeSourceModalOpen] = useState(false);
   const [currentIncomeSource, setCurrentIncomeSource] = useState<IncomeSource | null>(null); // For editing
   const [incomeSourceName, setIncomeSourceName] = useState('');
-  const [incomeSourceAmount, setIncomeSourceAmount] = useState(''); // This will store the formatted string for live input
+  const [incomeSourceAmountRaw, setIncomeSourceAmountRaw] = useState(''); 
 
   const yearOptions = useMemo(() => generateYearOptions(), []);
   const monthOptions = useMemo(() => generateMonthOptions(t, locale), [t, locale]);
+
+  const getDecimalSeparator = useCallback(() => (locale === 'pt' ? ',' : '.'), [locale]);
+
+  const sanitizeNumericInput = useCallback((value: string) => {
+    const decimalSeparator = getDecimalSeparator();
+    const regex = new RegExp(`[^0-9${decimalSeparator === '.' ? '\\.' : decimalSeparator}]`, 'g');
+    return value.replace(regex, '');
+  }, [getDecimalSeparator]);
 
 
   const mapStoredDataToBills = useCallback((storedBills: StoredBillData[]): Bill[] => {
@@ -115,7 +126,7 @@ export default function HomePage() {
         return {
           ...baseBill,
           name: storedBill.name || t('home.bills.customBillFallback'),
-          icon: Receipt,
+          icon: Receipt, // Default icon for custom bills
         };
       }
       const config = PREDEFINED_BILLS_CONFIG.find(pb => pb.id === storedBill.id);
@@ -127,24 +138,26 @@ export default function HomePage() {
           icon: config.icon,
         };
       }
-      // Fallback for potentially corrupted data or old predefined bills not in current config
-      // Treat as custom bill if config not found
       return {
         ...baseBill,
-        name: storedBill.name || t('home.bills.customBillFallback'), // Use stored name if exists, else fallback
+        name: storedBill.name || t('home.bills.customBillFallback'),
         icon: Receipt,
-        isCustom: true, // Mark as custom since its original config is missing
+        isCustom: true,
       };
     }).filter(bill => bill !== null) as Bill[];
   }, [t]);
 
-  const initializePredefinedBills = useCallback((): StoredBillData[] => {
+  // This function is no longer used to initialize the main list directly.
+  // It's used when replicating bills to a new month that doesn't exist yet,
+  // or if we decide to use it for the "Quick Add" feature in the modal more directly.
+  const initializePredefinedStoredBills = useCallback((): StoredBillData[] => {
     return PREDEFINED_BILLS_CONFIG.map(config => ({
       id: config.id,
-      amount: 0,
+      amount: 0, // Predefined bills start with 0 amount
       isCustom: false,
     }));
   }, []);
+
 
   useEffect(() => {
     setIsClient(true);
@@ -191,103 +204,73 @@ export default function HomePage() {
       (data) => data.year === selectedYear && data.month === selectedMonth
     );
 
-    const resolvedIncomeSources: IncomeSource[] = [];
-    const constructedBillsData: StoredBillData[] = [];
     let finalMonthData: MonthlyData;
 
     if (!existingMonthData) {
-      // Initialize new month
+      // Initialize new month - bills array starts empty
       const primaryIncomeName = appStorage.defaultIncomeSourceName?.trim()
         ? appStorage.defaultIncomeSourceName
         : t('home.incomeSources.defaultPrimaryName');
-      resolvedIncomeSources.push({
+      
+      const initialIncomeSources: IncomeSource[] = [{
         id: `primary-${selectedYear}-${selectedMonth}-${Date.now()}`, 
         name: primaryIncomeName,
         amount: appStorage.defaultIncome || 0
-      });
-      constructedBillsData.push(...initializePredefinedBills());
+      }];
 
       finalMonthData = {
         year: selectedYear,
         month: selectedMonth,
-        incomeSources: resolvedIncomeSources,
-        bills: constructedBillsData,
+        incomeSources: initialIncomeSources,
+        bills: [], // Bills start empty for a new month
       };
     } else {
-      // Month data exists, merge and ensure integrity
-      resolvedIncomeSources.push(...existingMonthData.incomeSources);
-      // Ensure primary income source is present if defaultIncome is set and no primary exists
-      const hasPrimarySource = resolvedIncomeSources.some(s => s.id.startsWith('primary-'));
-      if (!hasPrimarySource && (appStorage.defaultIncome || 0) > 0) {
-          const primaryIncomeName = appStorage.defaultIncomeSourceName?.trim()
-              ? appStorage.defaultIncomeSourceName
-              : t('home.incomeSources.defaultPrimaryName');
-          resolvedIncomeSources.unshift({ // Add to the beginning to make it prominent
-              id: `primary-${selectedYear}-${selectedMonth}-${Date.now()}`,
-              name: primaryIncomeName,
-              amount: appStorage.defaultIncome || 0
-          });
-      } else if (resolvedIncomeSources.length === 0 && (appStorage.defaultIncome || 0) > 0) {
-        // Handle case where existingMonthData.incomeSources was empty array, but defaultIncome is set
-        const primaryIncomeName = appStorage.defaultIncomeSourceName?.trim()
-            ? appStorage.defaultIncomeSourceName
-            : t('home.incomeSources.defaultPrimaryName');
-        resolvedIncomeSources.push({
-            id: `primary-${selectedYear}-${selectedMonth}-${Date.now()}`,
-            name: primaryIncomeName,
-            amount: appStorage.defaultIncome || 0
+      // Month data exists
+      const resolvedIncomeSources = [...(existingMonthData.incomeSources || [])];
+      const primaryIncomeName = appStorage.defaultIncomeSourceName?.trim()
+        ? appStorage.defaultIncomeSourceName
+        : t('home.incomeSources.defaultPrimaryName');
+      const primarySourceExists = resolvedIncomeSources.some(s => s.id.startsWith('primary-'));
+
+      if (!primarySourceExists) {
+        resolvedIncomeSources.unshift({
+          id: `primary-${selectedYear}-${selectedMonth}-${Date.now()}`,
+          name: primaryIncomeName,
+          amount: appStorage.defaultIncome || 0,
+        });
+      } else {
+         // Ensure primary source uses the latest default name/amount if it was 0 and settings changed
+        resolvedIncomeSources.forEach(src => {
+          if(src.id.startsWith('primary-')) {
+            // If the name matches the default untranslated key, update it to the potentially new custom name or new translated default
+            if (src.name === 'Primary Income' || src.name === t('home.incomeSources.defaultPrimaryName', undefined, {locale: 'en'}) || src.name === t('home.incomeSources.defaultPrimaryName', undefined, {locale: 'pt'})) {
+               src.name = primaryIncomeName;
+            }
+            // If the stored amount was 0 (or falsy), update it with the defaultIncome from settings
+            if (!src.amount && (appStorage.defaultIncome || 0) > 0) {
+                src.amount = appStorage.defaultIncome || 0;
+            }
+          }
         });
       }
-
-
-      const predefinedBillConfigs = initializePredefinedBills(); 
-      const storedBillsFromExistingMonth = existingMonthData.bills || [];
-      const processedPredefinedIds = new Set<string>();
-
-      predefinedBillConfigs.forEach(pbConfig => {
-        const storedVersion = storedBillsFromExistingMonth.find(sb => sb.id === pbConfig.id && !sb.isCustom);
-        if (storedVersion) {
-          constructedBillsData.push({ ...pbConfig, ...storedVersion }); 
-        } else {
-          constructedBillsData.push(pbConfig); 
-        }
-        processedPredefinedIds.add(pbConfig.id);
-      });
-
-      const customBillsFromStorage = storedBillsFromExistingMonth.filter(sb => sb.isCustom);
-      customBillsFromStorage.forEach(customBill => {
-        if (!processedPredefinedIds.has(customBill.id)) { 
-          if (!constructedBillsData.some(cb => cb.id === customBill.id)) {
-             constructedBillsData.push(customBill);
-          } else {
-            console.warn(`Duplicate custom bill ID '${customBill.id}' found in storage for month ${selectedMonth}/${selectedYear}. Skipping subsequent occurrences.`);
-          }
-        } else {
-            console.warn(`Custom bill from storage with ID '${customBill.id}' clashes with a predefined bill ID for month ${selectedMonth}/${selectedYear}. Ignoring stored custom version.`);
-        }
-      });
       
+      const uniqueIncomeSources = Array.from(new Map(resolvedIncomeSources.map(item => [item.id, item])).values());
+      const uniqueStoredBills = Array.from(new Map((existingMonthData.bills || []).map(item => [item.id, item])).values());
+
       finalMonthData = {
-          ...existingMonthData,
-          incomeSources: resolvedIncomeSources,
-          bills: constructedBillsData,
+        ...existingMonthData,
+        incomeSources: uniqueIncomeSources,
+        bills: uniqueStoredBills,
       };
     }
     
-    const uniqueStoredBills = Array.from(new Map(finalMonthData.bills.map(item => [item.id, item])).values());
-    finalMonthData.bills = uniqueStoredBills;
-
-    const uniqueIncomeSources = Array.from(new Map(finalMonthData.incomeSources.map(item => [item.id, item])).values());
-    finalMonthData.incomeSources = uniqueIncomeSources;
-
-
     setCurrentMonthlyData(finalMonthData);
     setIncomeSources(finalMonthData.incomeSources);
     setBills(mapStoredDataToBills(finalMonthData.bills));
     setInsights(null);
     setErrorInsights(null);
 
-  }, [isClient, appStorage, selectedYear, selectedMonth, initializePredefinedBills, mapStoredDataToBills, t]);
+  }, [isClient, appStorage, selectedYear, selectedMonth, mapStoredDataToBills, t]);
 
 
   useEffect(() => {
@@ -322,14 +305,32 @@ export default function HomePage() {
     }
   }, [t, locale, isClient]);
 
-  const handleBillAmountDisplayChange = (billId: string, displayValue: string) => {
-    const newAmount = parseCurrency(displayValue);
-    const updatedBills = bills.map(bill =>
-      bill.id === billId ? { ...bill, amount: newAmount } : bill
+
+  const handleBillAmountRawChange = (billId: string, rawValue: string) => {
+    const sanitizedValue = sanitizeNumericInput(rawValue);
+    const numericValue = parseCurrency(sanitizedValue); // Parse the sanitized value
+
+    setBills(prevBills =>
+      prevBills.map(bill =>
+        bill.id === billId ? { ...bill, amount: numericValue, rawAmountDisplay: sanitizedValue } : bill
+      )
     );
-    setBills(updatedBills);
-    setCurrentMonthlyData(prev => prev ? { ...prev, bills: billsToStoredBillsArray(updatedBills) } : null);
   };
+
+  const handleBillAmountBlur = (billId: string) => {
+    setBills(prevBills => {
+      const updatedBills = prevBills.map(bill => {
+        if (bill.id === billId) {
+          const { rawAmountDisplay, ...rest } = bill; // Remove rawAmountDisplay
+          return rest;
+        }
+        return bill;
+      });
+      setCurrentMonthlyData(prev => prev ? { ...prev, bills: billsToStoredBillsArray(updatedBills) } : null);
+      return updatedBills;
+    });
+  };
+
 
   const handleBillIncomeSourceChange = (billId: string, sourceId: string) => {
     const updatedBills = bills.map(bill =>
@@ -401,34 +402,69 @@ export default function HomePage() {
     }
   }, [currentMonthlyData, toast, t, getLocale, bills]);
 
+
+  const openAddBillModal = () => {
+    setNewBillName('');
+    setNewBillAmountRaw('');
+    setNewBillIcon(Receipt);
+    setNewBillIsCustom(true);
+    setNewBillPredefinedId(null);
+    setSelectedIncomeSourceForNewBill(undefined);
+    setIsAddBillModalOpen(true);
+  };
+
+  const handlePredefinedBillSelect = (config: BillConfig) => {
+    setNewBillName(t(config.nameKey) || config.defaultName);
+    setNewBillIcon(config.icon);
+    setNewBillIsCustom(false);
+    setNewBillPredefinedId(config.id);
+    // Keep newBillAmountRaw as is, user needs to enter it.
+  };
+  
+  const handleNewBillNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setNewBillName(e.target.value);
+    // If user starts typing a name after selecting a predefined one, it becomes custom
+    if (newBillPredefinedId) {
+      setNewBillIsCustom(true);
+      setNewBillIcon(Receipt); // Revert to default custom icon
+      // setNewBillPredefinedId(null); // Or keep predefined ID for potential future logic
+    }
+  };
+
+
   const handleAddNewBill = () => {
-    const parsedAmount = parseCurrency(newBillAmount);
+    const parsedAmount = parseCurrency(newBillAmountRaw); // Parse the raw string
     if (!newBillName.trim()) {
       toast({ variant: "destructive", title: t('generic.error'), description: t('home.addBillModal.validation.nameRequired') });
       return;
     }
     if (parsedAmount <= 0) { 
-      toast({ variant: "destructive", title: t('generic.error'), description: t('home.addBillModal.validation.amountRequired') });
+      toast({ variant: "destructive", title: t('generic.error'), description: t('home.addBillModal.validation.amountMustBePositiveOrZero') });
       return;
     }
 
     const newBillEntry: Bill = {
-      id: `custom-${Date.now()}`,
+      id: newBillIsCustom || !newBillPredefinedId ? `custom-${Date.now()}` : newBillPredefinedId,
       name: newBillName,
-      icon: Receipt, 
+      nameKey: newBillIsCustom || !newBillPredefinedId ? undefined : PREDEFINED_BILLS_CONFIG.find(c => c.id === newBillPredefinedId)?.nameKey,
+      icon: newBillIcon, 
       amount: parsedAmount,
-      isCustom: true,
+      isCustom: newBillIsCustom || !newBillPredefinedId,
       incomeSourceId: selectedIncomeSourceForNewBill === "unassigned" ? undefined : selectedIncomeSourceForNewBill,
     };
+
+    const billExists = bills.some(b => b.id === newBillEntry.id && !b.isCustom && !newBillEntry.isCustom);
+    if (billExists) {
+        toast({ variant: "destructive", title: t('generic.error'), description: t('home.addBillModal.validation.billExists', { billName: newBillEntry.name }) });
+        return;
+    }
+
 
     const updatedBills = [...bills, newBillEntry];
     setBills(updatedBills);
     setCurrentMonthlyData(prev => prev ? { ...prev, bills: billsToStoredBillsArray(updatedBills) } : null);
 
-    setNewBillName('');
-    setNewBillAmount(''); 
-    setSelectedIncomeSourceForNewBill(undefined);
-    setIsAddBillModalOpen(false);
+    setIsAddBillModalOpen(false); // Close modal after adding
     toast({ title: t('home.addBillModal.toast.success.title'), description: t('home.addBillModal.toast.success.description', { billName: newBillEntry.name }) });
   };
 
@@ -446,24 +482,25 @@ export default function HomePage() {
     setCurrentIncomeSource(source);
     if (source) {
       setIncomeSourceName(source.name);
-      setIncomeSourceAmount(formatCurrency(source.amount)); 
+      setIncomeSourceAmountRaw(formatCurrency(source.amount)); 
     } else {
       setIncomeSourceName('');
-      setIncomeSourceAmount(''); 
+      setIncomeSourceAmountRaw(''); 
     }
     setIsIncomeSourceModalOpen(true);
   };
 
   const handleSaveIncomeSource = () => {
-    const parsedAmount = parseCurrency(incomeSourceAmount); 
+    const parsedAmount = parseCurrency(incomeSourceAmountRaw); 
     if (!incomeSourceName.trim()) {
       toast({ variant: "destructive", title: t('generic.error'), description: t('home.incomeSources.dialog.nameLabel') + ' ' + t('home.addBillModal.validation.nameRequired') });
       return;
     }
-    if (parsedAmount < 0) { 
-      toast({ variant: "destructive", title: t('generic.error'), description: t('home.incomeSources.dialog.amountLabel') + ' ' + t('home.addBillModal.validation.amountMustBePositiveOrZero') });
+     if (parsedAmount < 0) { 
+      toast({ variant: "destructive", title: t('generic.error'), description: t('home.addBillModal.validation.amountMustBePositiveOrZero') });
       return;
     }
+
 
     let updatedIncomeSources;
     if (currentIncomeSource) {
@@ -487,8 +524,7 @@ export default function HomePage() {
     const sourceToDelete = incomeSources.find(s => s.id === sourceId);
     if (!sourceToDelete) return;
 
-    // Prevent deletion of the primary income source if it's the only one and has a default amount
-    if (sourceToDelete.id.startsWith('primary-') && incomeSources.length === 1 && (appStorage?.defaultIncome || 0) > 0) {
+    if (sourceToDelete.id.startsWith('primary-') && incomeSources.length === 1) {
         toast({
             variant: "destructive",
             title: t('home.incomeSources.deleteConfirm.cannotDeletePrimaryTitle'),
@@ -521,26 +557,23 @@ export default function HomePage() {
     const nextYear = getYear(nextMonthDate);
 
     let nextMonthData = appStorage.allMonthlyData.find(d => d.year === nextYear && d.month === nextMonth);
-    const newAllMonthlyData = [...appStorage.allMonthlyData]; 
+    const newAllMonthlyData = [...appStorage.allMonthlyData.filter(d => !(d.year === nextYear && d.month === nextMonth))];
 
     const replicatedStoredBill = billToStoredBill(billToReplicate);
 
     if (nextMonthData) {
-      const index = newAllMonthlyData.findIndex(d => d.year === nextYear && d.month === nextMonth);
-      if (index > -1) newAllMonthlyData.splice(index, 1);
-
-
       const billExists = nextMonthData.bills.some(b => b.id === replicatedStoredBill.id);
       if (!billExists) {
          nextMonthData.bills.push(replicatedStoredBill);
       } else {
         nextMonthData.bills = nextMonthData.bills.map(b => b.id === replicatedStoredBill.id ? replicatedStoredBill : b);
       }
-       newAllMonthlyData.push(nextMonthData); 
     } else {
+      // Create new month data if it doesn't exist
       const primaryIncomeName = appStorage.defaultIncomeSourceName?.trim()
         ? appStorage.defaultIncomeSourceName
         : t('home.incomeSources.defaultPrimaryName');
+      
       nextMonthData = {
         year: nextYear,
         month: nextMonth,
@@ -549,25 +582,20 @@ export default function HomePage() {
           name: primaryIncomeName,
           amount: appStorage.defaultIncome || 0
         }],
-        bills: [...initializePredefinedBills().filter(pb => pb.id !== replicatedStoredBill.id), replicatedStoredBill],
+        // Bills start empty, then add replicated one. If more complex predefined logic is needed for new months, adjust here.
+        bills: [replicatedStoredBill], 
       };
-      newAllMonthlyData.push(nextMonthData);
     }
     
     const uniqueStoredBillsNextMonth = Array.from(new Map(nextMonthData.bills.map(item => [item.id, item])).values());
     nextMonthData.bills = uniqueStoredBillsNextMonth;
     
-    const newAllMonthlyDataWithoutDuplicates = newAllMonthlyData.map(monthEntry => {
-        if (monthEntry.year === nextYear && monthEntry.month === nextMonth) {
-            return nextMonthData;
-        }
-        return monthEntry;
-    });
+    newAllMonthlyData.push(nextMonthData);
 
 
     const updatedAppStorage: AppStorage = {
       ...appStorage,
-      allMonthlyData: newAllMonthlyDataWithoutDuplicates,
+      allMonthlyData: newAllMonthlyData,
     };
 
     setAppStorage(updatedAppStorage); 
@@ -579,7 +607,7 @@ export default function HomePage() {
       description: t('home.bills.toast.replicated.description', { billName: billToReplicate.name, nextMonth: nextMonthFormatted, nextYear: nextYear.toString() }),
     });
 
-  }, [appStorage, selectedYear, selectedMonth, t, locale, initializePredefinedBills, toast]);
+  }, [appStorage, selectedYear, selectedMonth, t, locale, toast]);
 
 
   const topExpenses = useMemo(() => {
@@ -757,6 +785,9 @@ export default function HomePage() {
               <CardDescription>{t('home.billsCard.descriptionPeriod', { month: monthOptions.find(m=>m.value === selectedMonth.toString())?.label || '', year: selectedYear.toString() })}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-1">
+              {bills.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-4">{t('home.bills.noBillsYet')}</p>
+              )}
               {bills.map(bill => (
                 <div key={bill.id} className="flex items-center gap-3 p-3 border-b last:border-b-0 hover:bg-muted/50 transition-colors rounded-md -mx-3 px-3">
                   <bill.icon className="h-7 w-7 text-accent flex-shrink-0"/>
@@ -783,10 +814,11 @@ export default function HomePage() {
                   </div>
                   <Input
                     id={`bill-amount-${bill.id}`}
-                    type="text" 
-                    value={formatCurrency(bill.amount)}
-                    onChange={(e) => handleBillAmountDisplayChange(bill.id, e.target.value)}
-                    placeholder={formatCurrency(0)}
+                    type="text"
+                    value={(bill as any).rawAmountDisplay ?? (bill.amount === 0 ? '' : formatCurrency(bill.amount))}
+                    onChange={(e) => handleBillAmountRawChange(bill.id, e.target.value)}
+                    onBlur={() => handleBillAmountBlur(bill.id)}
+                    placeholder={t('home.addBillModal.amountPlaceholder')}
                     className="w-28 text-right text-sm" 
                     aria-label={`${bill.name} ${t('home.addBillModal.amountLabel')}`}
                   />
@@ -842,66 +874,13 @@ export default function HomePage() {
                   </div>
                 </div>
               ))}
-               <Dialog open={isAddBillModalOpen} onOpenChange={setIsAddBillModalOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline" className="w-full mt-4">
+            </CardContent>
+            <CardFooter>
+                <Button variant="outline" className="w-full mt-4" onClick={openAddBillModal}>
                     <PlusCircle className="mr-2 h-4 w-4" />
                     {t('home.addBillButton')}
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>{t('home.addBillModal.title')}</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-4 py-4">
-                    <div>
-                      <Label htmlFor="newBillName">{t('home.addBillModal.nameLabel')}</Label>
-                      <Input
-                        id="newBillName"
-                        value={newBillName}
-                        onChange={(e) => setNewBillName(e.target.value)}
-                        placeholder={t('home.addBillModal.namePlaceholder')}
-                        />
-                    </div>
-                    <div>
-                      <Label htmlFor="newBillAmount">{t('home.addBillModal.amountLabel')}</Label>
-                      <Input
-                        id="newBillAmount"
-                        type="text"
-                        value={newBillAmount} 
-                        onChange={(e) => setNewBillAmount(e.target.value)} 
-                        onBlur={(e) => { 
-                            const numericValue = parseCurrency(e.target.value);
-                            setNewBillAmount(formatCurrency(numericValue));
-                        }}
-                        placeholder={formatCurrency(0)}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="newBillIncomeSource">{t('home.bills.assignIncomeSourceLabel')}</Label>
-                      <Select
-                        value={selectedIncomeSourceForNewBill}
-                        onValueChange={setSelectedIncomeSourceForNewBill}
-                        >
-                        <SelectTrigger id="newBillIncomeSource">
-                          <SelectValue placeholder={t('home.bills.unassignedIncomeSource')} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="unassigned">{t('home.bills.unassignedIncomeSource')}</SelectItem>
-                          {incomeSources.map(source => (
-                            <SelectItem key={source.id} value={source.id}>{source.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  <DialogFooter>
-                    <Button variant="outline" onClick={() => setIsAddBillModalOpen(false)}>{t('generic.cancel')}</Button>
-                    <Button onClick={handleAddNewBill}>{t('home.addBillModal.saveButton')}</Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
-            </CardContent>
+                </Button>
+            </CardFooter>
           </Card>
         </div>
 
@@ -966,7 +945,7 @@ export default function HomePage() {
             </CardHeader>
             <CardContent>
               {expenseChartData.length > 0 ? (
-                <ChartContainer config={expenseChartConfig} className="mx-auto aspect-square h-[250px] w-full">
+                <ChartContainer config={expenseChartConfig} className="mx-auto aspect-square h-[250px] sm:h-[300px] w-full">
                   <PieChart>
                     <ChartTooltip content={<ChartTooltipContent hideLabel />} />
                     <Pie data={expenseChartData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} labelLine={false} label={({ percent }) => `${(percent * 100).toFixed(0)}%`}>
@@ -993,7 +972,7 @@ export default function HomePage() {
             </CardHeader>
             <CardContent>
               {incomeContributionChartData.length > 0 ? (
-                 <ChartContainer config={incomeContributionChartConfig} className="mx-auto aspect-square h-[250px] w-full">
+                 <ChartContainer config={incomeContributionChartConfig} className="mx-auto aspect-square h-[250px] sm:h-[300px] w-full">
                   <PieChart>
                     <ChartTooltip content={<ChartTooltipContent nameKey="name" hideLabel />} />
                     <Pie data={incomeContributionChartData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} labelLine={false} label={({ percent }) => `${(percent * 100).toFixed(0)}%`}>
@@ -1061,6 +1040,83 @@ export default function HomePage() {
         </div>
       </main>
 
+      {/* Add/Edit Bill Modal */}
+      <Dialog open={isAddBillModalOpen} onOpenChange={setIsAddBillModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('home.addBillModal.title')}</DialogTitle>
+            <DialogDescription>{t('home.addBillModal.description')}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div>
+              <Label htmlFor="quickAddBill" className="text-sm font-medium">{t('home.addBillModal.quickAddLabel')}</Label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-1">
+                {PREDEFINED_BILLS_CONFIG.map(config => (
+                  <Button
+                    key={config.id}
+                    variant="outline"
+                    size="sm"
+                    className="flex flex-col h-auto p-2 items-center justify-center gap-1 text-xs"
+                    onClick={() => handlePredefinedBillSelect(config)}
+                  >
+                    <config.icon className="h-5 w-5 text-accent" />
+                    <span>{t(config.nameKey)}</span>
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <Separator />
+             <div>
+              <Label htmlFor="newBillName">{t('home.addBillModal.nameLabel')}</Label>
+              <div className="flex items-center gap-2">
+                {React.createElement(newBillIcon, { className: "h-5 w-5 text-muted-foreground" })}
+                <Input
+                  id="newBillName"
+                  value={newBillName}
+                  onChange={handleNewBillNameChange}
+                  placeholder={t('home.addBillModal.namePlaceholder')}
+                />
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="newBillAmount">{t('home.addBillModal.amountLabel')}</Label>
+              <Input
+                id="newBillAmount"
+                type="text"
+                value={newBillAmountRaw} 
+                onChange={(e) => setNewBillAmountRaw(sanitizeNumericInput(e.target.value))}
+                onBlur={(e) => { 
+                    const numericValue = parseCurrency(e.target.value);
+                    setNewBillAmountRaw(numericValue > 0 ? formatCurrency(numericValue) : ''); // Show empty if 0
+                }}
+                placeholder={t('home.addBillModal.amountPlaceholder')}
+              />
+            </div>
+            <div>
+              <Label htmlFor="newBillIncomeSource">{t('home.bills.assignIncomeSourceLabel')}</Label>
+              <Select
+                value={selectedIncomeSourceForNewBill}
+                onValueChange={setSelectedIncomeSourceForNewBill}
+                >
+                <SelectTrigger id="newBillIncomeSource">
+                  <SelectValue placeholder={t('home.bills.unassignedIncomeSource')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unassigned">{t('home.bills.unassignedIncomeSource')}</SelectItem>
+                  {incomeSources.map(source => (
+                    <SelectItem key={source.id} value={source.id}>{source.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAddBillModalOpen(false)}>{t('generic.cancel')}</Button>
+            <Button onClick={handleAddNewBill}>{t('home.addBillModal.saveButton')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Income Source Modal */}
       <Dialog open={isIncomeSourceModalOpen} onOpenChange={setIsIncomeSourceModalOpen}>
         <DialogContent>
@@ -1082,15 +1138,15 @@ export default function HomePage() {
               <Input
                 id="incomeSourceAmount"
                 type="text" 
-                value={incomeSourceAmount} 
+                value={incomeSourceAmountRaw} 
                 onChange={(e) => {
-                  setIncomeSourceAmount(e.target.value);
+                  setIncomeSourceAmountRaw(sanitizeNumericInput(e.target.value));
                 }}
                 onBlur={(e) => { 
                     const numericValue = parseCurrency(e.target.value);
-                    setIncomeSourceAmount(formatCurrency(numericValue));
+                    setIncomeSourceAmountRaw(numericValue > 0 ? formatCurrency(numericValue) : (numericValue === 0 ? formatCurrency(0) : ''));
                 }}
-                placeholder={formatCurrency(0)}
+                placeholder={t('home.addBillModal.amountPlaceholder')}
               />
             </div>
           </div>
@@ -1113,3 +1169,9 @@ export default function HomePage() {
   );
 }
 
+// Extend Bill type for UI state if needed, e.g. rawAmountDisplay
+declare module '@/types' {
+    interface Bill {
+        rawAmountDisplay?: string;
+    }
+}

@@ -1,3 +1,4 @@
+
 "use client"
 
 import * as React from "react"
@@ -280,7 +281,7 @@ const ChartLegendContent = React.forwardRef<
       <div
         ref={ref}
         className={cn(
-          "flex items-center justify-center gap-4",
+          "flex flex-wrap items-start justify-center gap-x-4 gap-y-1 px-2", // Use flex-wrap and allow vertical gap
           verticalAlign === "top" ? "pb-3" : "pt-3",
           className
         )}
@@ -291,9 +292,9 @@ const ChartLegendContent = React.forwardRef<
 
           return (
             <div
-              key={item.value}
+              key={item.value} // item.value might not be unique, consider item.dataKey or a generated key
               className={cn(
-                "flex items-center gap-1.5 [&>svg]:h-3 [&>svg]:w-3 [&>svg]:text-muted-foreground"
+                "flex items-center gap-1.5 text-xs [&>svg]:h-3 [&>svg]:w-3 [&>svg]:text-muted-foreground"
               )}
             >
               {itemConfig?.icon && !hideIcon ? (
