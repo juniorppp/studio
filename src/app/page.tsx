@@ -1,6 +1,8 @@
+
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import Link from 'next/link'; // Added import
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Droplet, Zap, Wifi, Home, DollarSign, LineChart, AlertCircle, Loader2, Brain } from 'lucide-react';
+import { Droplet, Zap, Wifi, Home, DollarSign, LineChart, AlertCircle, Loader2, Brain, Settings as SettingsIcon } from 'lucide-react'; // Added SettingsIcon
 import type { Bill, FinancialData } from '@/types';
 import { getSpendingInsights } from '@/ai/flows/spending-insights';
 import type { SpendingInsightsInput, SpendingInsightsOutput } from '@/ai/flows/spending-insights';
@@ -42,7 +44,6 @@ export default function HomePage() {
       if (storedData) {
         const parsedData: FinancialData = JSON.parse(storedData);
         setIncome(parsedData.income || 0);
-        // Ensure loaded bills match initialBills structure and update amounts
         const updatedBills = initialBills.map(initialBill => {
           const storedBill = parsedData.bills.find(b => b.id === initialBill.id);
           return storedBill ? { ...initialBill, amount: storedBill.amount || 0 } : initialBill;
@@ -98,7 +99,7 @@ export default function HomePage() {
 
   const expenseRatio = useMemo(() => {
     if (income === 0) return 0;
-    return Math.min((totalExpenses / income) * 100, 100); // Cap at 100%
+    return Math.min((totalExpenses / income) * 100, 100);
   }, [income, totalExpenses]);
 
   const handleGenerateInsights = useCallback(async () => {
@@ -128,8 +129,6 @@ export default function HomePage() {
   }, [income, bills, toast]);
   
   if (!isClient) {
-    // Render a loading state or null until the client has mounted
-    // This helps avoid hydration mismatches with localStorage
     return (
       <div className="flex flex-col items-center justify-center min-h-screen p-4 sm:p-8 bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -141,14 +140,25 @@ export default function HomePage() {
   return (
     <div className="flex flex-col items-center min-h-screen p-4 sm:p-8 bg-background selection:bg-primary/20">
       <header className="w-full max-w-5xl mb-8 text-center">
-        <div className="flex justify-center mb-2">
+        {/* AppLogo is now in SiteHeader, so remove it from here if SiteHeader is global */}
+        {/* <div className="flex justify-center mb-2">
           <AppLogo />
+        </div> */}
+        <h1 className="text-4xl font-bold tracking-tight text-foreground sm:text-5xl font-headline">
+          Welcome to {siteConfig.name}
+        </h1>
+        <p className="mt-3 text-xl text-muted-foreground font-headline">{siteConfig.description}</p>
+        <div className="mt-6">
+          <Link href="/settings" passHref>
+            <Button variant="outline">
+              <SettingsIcon className="mr-2 h-4 w-4" />
+              Go to Settings
+            </Button>
+          </Link>
         </div>
-        <p className="text-muted-foreground font-headline">{siteConfig.description}</p>
       </header>
 
       <main className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left Column: Income & Bills */}
         <div className="space-y-6">
           <Card className="shadow-lg_ hover:shadow-xl transition-shadow duration-300">
             <CardHeader>
@@ -156,7 +166,7 @@ export default function HomePage() {
                 <DollarSign className="mr-2 h-7 w-7 text-primary" />
                 Your Income
               </CardTitle>
-              <CardDescription>Enter your total monthly income.</CardDescription>
+              <CardDescription>Enter your total monthly income. You can also set this on the Settings page.</CardDescription>
             </CardHeader>
             <CardContent>
               <Label htmlFor="income" className="text-sm font-medium">Total Income</Label>
@@ -200,7 +210,6 @@ export default function HomePage() {
           </Card>
         </div>
 
-        {/* Right Column: Summary & Insights */}
         <div className="space-y-6">
           <Card className="shadow-lg_ hover:shadow-xl transition-shadow duration-300">
             <CardHeader>
