@@ -29,25 +29,6 @@ const LOCAL_STORAGE_LANG_KEY = 'billBlissLanguage';
 
 export const LocalizationContext = createContext<LocalizationContextType | undefined>(undefined);
 
-function getNestedTranslation(keys: string[], currentTranslations: Translations | string): string | undefined {
-  if (typeof currentTranslations === 'string') {
-    return keys.length === 0 ? currentTranslations : undefined;
-  }
-  if (keys.length === 0) return undefined; // Should not happen if used correctly
-
-  const key = keys[0];
-  const nextNode = currentTranslations[key];
-
-  if (keys.length === 1) {
-    return typeof nextNode === 'string' ? nextNode : undefined;
-  }
-  if (typeof nextNode === 'object' && nextNode !== null) {
-    return getNestedTranslation(keys.slice(1), nextNode as Translations);
-  }
-  return undefined;
-}
-
-
 export const LocalizationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [locale, setLocaleState] = useState<Locale>(DEFAULT_LOCALE);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -76,19 +57,32 @@ export const LocalizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const getLocale = useCallback(() => locale, [locale]);
 
   const t = useCallback((key: string, values?: TranslationValues): string => {
-    const keys = key.split('.');
-    let text = getNestedTranslation(keys, translations[locale] || translations[DEFAULT_LOCALE]);
+    let text: string | undefined;
 
+    // Attempt to get translation from the current locale
+    const currentLocaleTranslations = translations[locale];
+    if (currentLocaleTranslations) {
+      text = currentLocaleTranslations[key] as string | undefined;
+    }
+
+    // If not found in current locale, try the default locale
     if (text === undefined) {
-      console.warn(`Translation key "${key}" not found for locale "${locale}". Falling back to default locale.`);
-      text = getNestedTranslation(keys, translations[DEFAULT_LOCALE]);
+      if (locale !== DEFAULT_LOCALE) { // Only warn if we are actually falling back
+        console.warn(`Translation key "${key}" not found for locale "${locale}". Falling back to default locale ('${DEFAULT_LOCALE}').`);
+      }
+      const defaultLocaleTranslations = translations[DEFAULT_LOCALE];
+      if (defaultLocaleTranslations) {
+        text = defaultLocaleTranslations[key] as string | undefined;
+      }
     }
     
+    // If still not found, log an error and return the key itself
     if (text === undefined) {
-        console.error(`Translation key "${key}" not found in default locale either.`);
-        return key; // Return the key itself if not found anywhere
+        console.error(`Translation key "${key}" not found in default locale ('${DEFAULT_LOCALE}') or current locale ('${locale}'). Returning key.`);
+        return key; 
     }
 
+    // Replace placeholders if any
     if (values) {
       Object.keys(values).forEach((placeholder) => {
         text = text!.replace(new RegExp(`{${placeholder}}`, 'g'), String(values[placeholder]));
@@ -106,10 +100,8 @@ export const LocalizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   }, [locale]);
 
   const parseCurrency = useCallback((formattedAmount: string): number => {
-    // Remove currency symbols, thousands separators
     const sanitized = formattedAmount.replace(/[^\d,.-]/g, '');
-    // Replace locale-specific decimal separator with a period
-    const normalized = locale === 'pt' ? sanitized.replace('.', '').replace(',', '.') : sanitized.replace(',', '');
+    const normalized = locale === 'pt' ? sanitized.replace(/\./g, '').replace(',', '.') : sanitized.replace(/,/g, '');
     const value = parseFloat(normalized);
     return isNaN(value) ? 0 : value;
   }, [locale]);
@@ -118,7 +110,7 @@ export const LocalizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     [locale, setLocale, t, formatCurrency, parseCurrency, getLocale]);
 
   if (!isInitialized) {
-    return null; // Or a loading spinner, but null avoids hydration issues with localStorage
+    return null; 
   }
 
   return (
