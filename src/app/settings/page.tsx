@@ -7,95 +7,122 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { DollarSign, Languages, Save } from 'lucide-react';
-import type { FinancialData, Bill } from '@/types';
+import { DollarSign, Languages, Save, Loader2 } from 'lucide-react';
+import type { FinancialData, StoredBillData } from '@/types';
 import { useToast } from "@/hooks/use-toast";
-import { siteConfig } from '@/config/site';
+import { useLocalization } from '@/hooks/use-localization';
 
 const LOCAL_STORAGE_KEY = 'billBlissData';
 
-// Default initial bills structure, similar to home page, to ensure bills data isn't lost
-const initialBills: Bill[] = [
-  { id: 'water', name: 'Water Bill', icon: () => null, amount: 0 }, // Icon not used here but part of type
-  { id: 'electricity', name: 'Electricity Bill', icon: () => null, amount: 0 },
-  { id: 'internet', name: 'Internet Bill', icon: () => null, amount: 0 },
-  { id: 'rent', name: 'Rent / Mortgage', icon: () => null, amount: 0 },
-];
-
-
 export default function SettingsPage() {
+  const { t, locale, setLocale, formatCurrency, parseCurrency, getLocale } = useLocalization();
   const [income, setIncome] = useState<number>(0);
-  const [currentLanguage, setCurrentLanguage] = useState<string>('en');
+  const [currentLanguage, setCurrentLanguage] = useState<string>(locale);
   const [isClient, setIsClient] = useState(false);
+  const [localIncomeDisplay, setLocalIncomeDisplay] = useState('');
+
   const { toast } = useToast();
 
   useEffect(() => {
     setIsClient(true);
+    setCurrentLanguage(getLocale());
     try {
       const storedData = localStorage.getItem(LOCAL_STORAGE_KEY);
       if (storedData) {
         const parsedData: FinancialData = JSON.parse(storedData);
-        setIncome(parsedData.income || 0);
-        // You could also load/save language preference here if it were functional
+        const loadedIncome = parsedData.income || 0;
+        setIncome(loadedIncome);
+        setLocalIncomeDisplay(formatCurrency(loadedIncome));
+        if (parsedData.language && (parsedData.language === 'en' || parsedData.language === 'pt')) {
+          // setLocale(parsedData.language); // Already handled by LocalizationProvider
+          setCurrentLanguage(parsedData.language);
+        }
+      } else {
+        setLocalIncomeDisplay(formatCurrency(0));
       }
     } catch (error) {
       console.error("Failed to load data from localStorage:", error);
       toast({
         variant: "destructive",
-        title: "Error loading settings",
-        description: "Could not load saved settings. Using default values.",
+        title: t('toast.errorLoadingSettings.title'),
+        description: t('toast.errorLoadingSettings.description'),
       });
+      setLocalIncomeDisplay(formatCurrency(0));
     }
-  }, [toast]);
+  }, [toast, t, formatCurrency, getLocale]);
 
-  const handleIncomeChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setIncome(parseFloat(event.target.value) || 0);
+  useEffect(() => {
+    // Update display when locale changes (e.g. currency format)
+    setLocalIncomeDisplay(formatCurrency(income));
+    setCurrentLanguage(getLocale());
+  }, [locale, income, formatCurrency, getLocale]);
+
+
+  const handleIncomeInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const displayValue = event.target.value;
+    setLocalIncomeDisplay(displayValue); // Keep the raw input for display
+    
+    // Attempt to parse, but only update state on blur or save to avoid weird reformatting during typing
+    // const numericValue = parseCurrency(displayValue);
+    // setIncome(numericValue); // This would update too aggressively
+  };
+
+  const handleIncomeInputBlur = () => {
+    const numericValue = parseCurrency(localIncomeDisplay);
+    setIncome(numericValue);
+    setLocalIncomeDisplay(formatCurrency(numericValue)); // Reformat to canonical
   };
 
   const handleLanguageChange = (value: string) => {
-    setCurrentLanguage(value);
-    toast({
-      title: "Language setting",
-      description: "Full language switching is not yet implemented. This is a placeholder.",
-    });
-    // In a real scenario, you'd save this preference and trigger i18n changes.
+    if (value === 'en' || value === 'pt') {
+      setLocale(value);
+      setCurrentLanguage(value);
+      toast({
+        title: t('toast.languageUpdated.title'),
+        description: value === 'pt' ? "O idioma foi definido para Português." : "Language has been set to English.",
+      });
+    }
   };
 
   const handleSaveChanges = useCallback(() => {
     if (!isClient) return;
     try {
+      // Final parse before saving
+      const numericIncome = parseCurrency(localIncomeDisplay);
+      setIncome(numericIncome); // Ensure income state is the numeric value
+      setLocalIncomeDisplay(formatCurrency(numericIncome)); // And display is formatted
+
       const storedData = localStorage.getItem(LOCAL_STORAGE_KEY);
       let currentData: FinancialData;
       if (storedData) {
         currentData = JSON.parse(storedData);
       } else {
-        // If no data exists, initialize with current income and default bills structure
-        currentData = { income: income, bills: initialBills.map(b => ({...b, icon: b.icon.name as any})) };
+        currentData = { income: numericIncome, bills: [], language: getLocale() };
       }
       
-      currentData.income = income;
-      // currentData.language = currentLanguage; // If saving language
+      currentData.income = numericIncome;
+      currentData.language = getLocale();
 
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(currentData));
       toast({
-        title: "Settings Saved",
-        description: "Your income has been updated.",
+        title: t('toast.settingsSaved.title'),
+        description: t('toast.settingsSaved.description'),
       });
     } catch (error) {
       console.error("Failed to save data to localStorage:", error);
       toast({
         variant: "destructive",
-        title: "Error saving settings",
-        description: "Could not save your settings.",
+        title: t('toast.errorSavingSettings.title'),
+        description: t('toast.errorSavingSettings.description'),
       });
     }
-  }, [income, isClient, toast]);
-
+  }, [isClient, toast, t, getLocale, parseCurrency, formatCurrency, localIncomeDisplay]);
 
   if (!isClient) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen p-4 sm:p-8 bg-background">
-        <p className="mt-4 text-lg text-foreground">Loading Settings...</p>
+      <div className="flex flex-col items-center justify-center min-h-[calc(100vh-56px)] p-4 sm:p-8 bg-background">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+        <p className="mt-4 text-lg text-foreground">{t('settings.loading')}</p>
       </div>
     );
   }
@@ -104,10 +131,10 @@ export default function SettingsPage() {
     <div className="container mx-auto py-8 px-4 sm:px-6 lg:px-8 max-w-2xl">
       <header className="mb-8">
         <h1 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl font-headline">
-          Settings
+          {t('settings.title')}
         </h1>
         <p className="mt-2 text-lg text-muted-foreground">
-          Manage your application settings.
+          {t('settings.description')}
         </p>
       </header>
 
@@ -116,20 +143,21 @@ export default function SettingsPage() {
           <CardHeader>
             <CardTitle className="flex items-center text-xl font-headline">
               <DollarSign className="mr-2 h-6 w-6 text-primary" />
-              Monthly Income
+              {t('settings.incomeCard.title')}
             </CardTitle>
-            <CardDescription>Set your total monthly income. This will be used across the app for calculations.</CardDescription>
+            <CardDescription>{t('settings.incomeCard.description')}</CardDescription>
           </CardHeader>
           <CardContent>
-            <Label htmlFor="income" className="text-sm font-medium">Total Monthly Income</Label>
+            <Label htmlFor="income" className="text-sm font-medium">{t('settings.incomeCard.label')}</Label>
             <Input
               id="income"
-              type="number"
-              value={income}
-              onChange={handleIncomeChange}
-              placeholder="e.g., 3000"
+              type="text" // Use text for formatted input
+              value={localIncomeDisplay}
+              onChange={handleIncomeInputChange}
+              onBlur={handleIncomeInputBlur}
+              placeholder={t('currency.placeholder', { exampleAmount: formatCurrency(3000)})}
               className="mt-1 text-lg"
-              aria-label="Total Monthly Income"
+              aria-label={t('settings.incomeCard.label')}
             />
           </CardContent>
         </Card>
@@ -138,31 +166,28 @@ export default function SettingsPage() {
           <CardHeader>
             <CardTitle className="flex items-center text-xl font-headline">
               <Languages className="mr-2 h-6 w-6 text-primary" />
-              Language
+              {t('settings.languageCard.title')}
             </CardTitle>
-            <CardDescription>Choose your preferred language. (Language switching is a placeholder)</CardDescription>
+            <CardDescription>{t('settings.languageCard.description')}</CardDescription>
           </CardHeader>
           <CardContent>
-            <Label htmlFor="language" className="text-sm font-medium">Select Language</Label>
+            <Label htmlFor="language" className="text-sm font-medium">{t('settings.languageCard.label')}</Label>
             <Select value={currentLanguage} onValueChange={handleLanguageChange}>
-              <SelectTrigger id="language" className="mt-1 text-lg" aria-label="Select Language">
-                <SelectValue placeholder="Select language" />
+              <SelectTrigger id="language" className="mt-1 text-lg" aria-label={t('settings.languageCard.label')}>
+                <SelectValue placeholder={t('settings.languageCard.label')} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="en">English</SelectItem>
-                <SelectItem value="pt">Português</SelectItem>
+                <SelectItem value="en">{t('settings.languageCard.english')}</SelectItem>
+                <SelectItem value="pt">{t('settings.languageCard.portuguese')}</SelectItem>
               </SelectContent>
             </Select>
-             <p className="mt-2 text-xs text-muted-foreground">
-              Note: Full language localization is not yet implemented. This is a UI placeholder.
-            </p>
           </CardContent>
         </Card>
         
         <div className="flex justify-end">
           <Button onClick={handleSaveChanges} className="text-lg px-6 py-3">
             <Save className="mr-2 h-5 w-5" />
-            Save Changes
+            {t('settings.saveButton')}
           </Button>
         </div>
       </div>

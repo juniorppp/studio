@@ -1,9 +1,10 @@
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 body {
-  font-family: Arial, Helvetica, sans-serif;
+  /* font-family: Arial, Helvetica, sans-serif; */ /* Replaced by font-body from layout/tailwind config */
 }
 
 @layer base {
@@ -109,5 +110,7 @@ body {
   }
   body {
     @apply bg-background text-foreground;
+    /* Ensure Inter is the default font if not applied by a more specific class */
+    font-family: 'Inter', sans-serif;
   }
 }
