@@ -1,3 +1,4 @@
+
 'use server';
 
 /**
@@ -9,7 +10,7 @@
  */
 
 import {ai} from '@/ai/genkit';
-import {z} from 'genkit';
+import {z} from 'genkit'; // Changed from '@genkit-ai/ai' for Zod
 
 const SpendingInsightsInputSchema = z.object({
   income: z.number().describe('The total income amount.'),
@@ -31,6 +32,7 @@ export async function getSpendingInsights(input: SpendingInsightsInput): Promise
   return spendingInsightsFlow(input);
 }
 
+// Updated to use ai.definePrompt
 const spendingInsightsPrompt = ai.definePrompt({
   name: 'spendingInsightsPrompt',
   input: {schema: SpendingInsightsInputSchema},
@@ -47,6 +49,7 @@ const spendingInsightsPrompt = ai.definePrompt({
   `,
 });
 
+// Updated to use ai.defineFlow
 const spendingInsightsFlow = ai.defineFlow(
   {
     name: 'spendingInsightsFlow',
@@ -54,7 +57,8 @@ const spendingInsightsFlow = ai.defineFlow(
     outputSchema: SpendingInsightsOutputSchema,
   },
   async input => {
+    // Updated to call the prompt directly and access .output
     const {output} = await spendingInsightsPrompt(input);
-    return output!;
+    return output!; // Use non-null assertion as per Genkit v1.x examples
   }
 );
