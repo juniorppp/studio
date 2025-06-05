@@ -35,6 +35,20 @@ const PREDEFINED_BILLS_CONFIG: BillConfig[] = [
   { id: 'rent', nameKey: 'home.bills.rent', defaultName: 'Rent / Mortgage', icon: Home },
 ];
 
+// Helper function to convert Bill (UI model) to StoredBillData (storage model)
+const billToStoredBill = (bill: Bill): StoredBillData => ({
+  id: bill.id,
+  amount: bill.amount,
+  name: bill.isCustom ? bill.name : undefined, // Only store name for custom bills
+  isCustom: !!bill.isCustom, // Ensure boolean
+  incomeSourceId: bill.incomeSourceId,
+});
+
+const billsToStoredBillsArray = (bills: Bill[]): StoredBillData[] => {
+  return bills.map(billToStoredBill);
+};
+
+
 const generateMonthOptions = (t: (key: string) => string, currentLocale: Locale) => {
   const formatPattern = 'LLLL'; 
   return Array.from({ length: 12 }, (_, i) => {
@@ -112,7 +126,14 @@ export default function HomePage() {
           icon: config.icon,
         };
       }
-      return null; 
+      // This case should ideally not happen if data is clean
+      console.warn(`Could not find config for predefined bill ID: ${storedBill.id}`);
+      return {
+        ...baseBill,
+        name: t('home.bills.customBillFallback'), // Fallback for missing predefined config
+        icon: Receipt,
+        isCustom: true, // Treat as custom if config is missing
+      };
     }).filter(bill => bill !== null) as Bill[];
   }, [t]);
   
@@ -129,23 +150,22 @@ export default function HomePage() {
     setIsClient(true);
     try {
       const storedDataString = localStorage.getItem(LOCAL_STORAGE_KEY);
+      let parsedData;
       if (storedDataString) {
-        const parsedData = JSON.parse(storedDataString);
-        const validatedAppStorage: AppStorage = {
-          userLocale: (parsedData.userLocale === 'en' || parsedData.userLocale === 'pt') ? parsedData.userLocale : getLocale(),
-          defaultIncome: typeof parsedData.defaultIncome === 'number' ? parsedData.defaultIncome : 0,
-          allMonthlyData: Array.isArray(parsedData.allMonthlyData) ? parsedData.allMonthlyData : [],
-        };
-        setAppStorage(validatedAppStorage);
-      } else {
-        const initialStorage: AppStorage = {
-          userLocale: getLocale(),
-          defaultIncome: 0,
-          allMonthlyData: [],
-        };
-        setAppStorage(initialStorage);
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(initialStorage));
+        parsedData = JSON.parse(storedDataString);
       }
+
+      const validatedAppStorage: AppStorage = {
+        userLocale: (parsedData?.userLocale === 'en' || parsedData?.userLocale === 'pt') ? parsedData.userLocale : getLocale(),
+        defaultIncome: typeof parsedData?.defaultIncome === 'number' ? parsedData.defaultIncome : 0,
+        allMonthlyData: Array.isArray(parsedData?.allMonthlyData) ? parsedData.allMonthlyData : [],
+      };
+      setAppStorage(validatedAppStorage);
+      
+      if (!storedDataString) { // If no data, initialize and save
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(validatedAppStorage));
+      }
+
     } catch (error) {
       console.error("Failed to load data from localStorage:", error);
       toast({
@@ -156,7 +176,7 @@ export default function HomePage() {
       const fallbackStorage: AppStorage = { userLocale: getLocale(), defaultIncome: 0, allMonthlyData: [] };
       setAppStorage(fallbackStorage);
     }
-  }, [toast, t, getLocale]);
+  }, [toast, t, getLocale]); // getLocale is stable from context
   
   // Effect to load/initialize data for the selectedYear and selectedMonth
   useEffect(() => {
@@ -180,12 +200,13 @@ export default function HomePage() {
     }
     
     setCurrentMonthlyData(monthData);
-    setIncomeSources(monthData.incomeSources || []);
-    setBills(mapStoredDataToBills(monthData.bills, monthData.incomeSources || []));
+    setIncomeSources(monthData.incomeSources || []); // Initialize UI state from currentMonthlyData
+    setBills(mapStoredDataToBills(monthData.bills, monthData.incomeSources || [])); // Initialize UI state
     setInsights(null); 
     setErrorInsights(null);
 
   }, [isClient, appStorage, selectedYear, selectedMonth, initializePredefinedBills, mapStoredDataToBills, t]);
+
 
   // Effect to save data to localStorage when currentMonthlyData changes
   useEffect(() => {
@@ -197,62 +218,44 @@ export default function HomePage() {
     updatedAllMonthlyData.push(currentMonthlyData);
 
     const newAppStorage: AppStorage = {
-      ...appStorage,
+      ...appStorage, // Preserve other parts of appStorage like defaultIncome
       allMonthlyData: updatedAllMonthlyData,
       userLocale: getLocale(), 
     };
     
-    setAppStorage(newAppStorage); 
+    // Only update appStorage state if it has actually changed to prevent loops
+    if (JSON.stringify(appStorage) !== JSON.stringify(newAppStorage)) {
+      setAppStorage(newAppStorage); 
+    }
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(newAppStorage));
 
-  }, [currentMonthlyData, isClient, getLocale]); 
+  }, [currentMonthlyData, isClient, getLocale, appStorage]); // appStorage is needed here to ensure we have the latest to merge with
 
-
-  useEffect(() => {
-    if (currentMonthlyData && JSON.stringify(currentMonthlyData.incomeSources) !== JSON.stringify(incomeSources)) {
-      setCurrentMonthlyData(prev => prev ? { ...prev, incomeSources } : null);
-    }
-  }, [incomeSources, currentMonthlyData]); 
-
-  useEffect(() => {
-    if (currentMonthlyData) {
-        const storedBillsData: StoredBillData[] = bills.map(bill => ({
-          id: bill.id,
-          amount: bill.amount,
-          name: bill.isCustom ? bill.name : undefined,
-          isCustom: bill.isCustom,
-          incomeSourceId: bill.incomeSourceId,
-        }));
-        
-        if (JSON.stringify(currentMonthlyData.bills) !== JSON.stringify(storedBillsData)) {
-             setCurrentMonthlyData(prev => prev ? { ...prev, bills: storedBillsData } : null);
-        }
-    }
-  }, [bills, currentMonthlyData]); 
-
+  // Effect to update bill names when language changes
    useEffect(() => {
-    if (isClient) {
+    if (isClient && bills.length > 0) { // Only run if bills are already populated
         setBills(currentBills => currentBills.map(bill => ({
           ...bill,
           name: bill.isCustom ? bill.name : (t(bill.nameKey || '') || PREDEFINED_BILLS_CONFIG.find(pb => pb.id === bill.id)?.defaultName || t('home.bills.customBillFallback'))
         })));
     }
-  }, [t, locale, isClient]);
+  }, [t, locale, isClient]); // Not adding 'bills' here intentionally to avoid loops; this effect is for re-translation.
 
   const handleBillAmountDisplayChange = (billId: string, displayValue: string) => {
-    setBills(prevBills =>
-      prevBills.map(bill =>
-        bill.id === billId ? { ...bill, amount: parseCurrency(displayValue) } : bill
-      )
+    const newAmount = parseCurrency(displayValue);
+    const updatedBills = bills.map(bill =>
+      bill.id === billId ? { ...bill, amount: newAmount } : bill
     );
+    setBills(updatedBills);
+    setCurrentMonthlyData(prev => prev ? { ...prev, bills: billsToStoredBillsArray(updatedBills) } : null);
   };
   
   const handleBillIncomeSourceChange = (billId: string, sourceId: string) => {
-    setBills(prevBills =>
-      prevBills.map(bill =>
-        bill.id === billId ? { ...bill, incomeSourceId: sourceId === "unassigned" ? undefined : sourceId } : bill
-      )
+    const updatedBills = bills.map(bill =>
+      bill.id === billId ? { ...bill, incomeSourceId: sourceId === "unassigned" ? undefined : sourceId } : bill
     );
+    setBills(updatedBills);
+    setCurrentMonthlyData(prev => prev ? { ...prev, bills: billsToStoredBillsArray(updatedBills) } : null);
   };
   
   const totalIncome = useMemo(() => {
@@ -288,8 +291,10 @@ export default function HomePage() {
       incomeSources: currentMonthlyData.incomeSources.map(s => ({name: s.name, amount: s.amount })),
       totalIncome: totalIncomeForAI,
       expenses: currentMonthlyData.bills.map(b => {
-          const billConfig = PREDEFINED_BILLS_CONFIG.find(pbc => pbc.id === b.id);
-          const name = b.isCustom ? b.name : (billConfig ? t(billConfig.nameKey) : t('home.bills.customBillFallback'));
+          // Find the full Bill object from the UI state to get the translated/correct name
+          const uiBill = bills.find(ui_b => ui_b.id === b.id);
+          const name = uiBill ? uiBill.name : (b.isCustom ? b.name : t('home.bills.customBillFallback'));
+          
           const paidBySource = currentMonthlyData.incomeSources.find(src => src.id === b.incomeSourceId);
           return { 
             category: name || t('home.bills.unknownCategory'), 
@@ -315,7 +320,7 @@ export default function HomePage() {
     } finally {
       setIsLoadingInsights(false);
     }
-  }, [currentMonthlyData, toast, t, getLocale]);
+  }, [currentMonthlyData, toast, t, getLocale, bills]); // Added bills to dependencies for name resolution
 
   const handleAddNewBill = () => {
     const parsedAmount = parseCurrency(newBillAmount);
@@ -328,7 +333,7 @@ export default function HomePage() {
       return;
     }
 
-    const newBill: Bill = {
+    const newBillEntry: Bill = {
       id: `custom-${Date.now()}`,
       name: newBillName,
       icon: Receipt,
@@ -336,12 +341,16 @@ export default function HomePage() {
       isCustom: true,
       incomeSourceId: selectedIncomeSourceForNewBill === "unassigned" ? undefined : selectedIncomeSourceForNewBill,
     };
-    setBills(prevBills => [...prevBills, newBill]); 
+    
+    const updatedBills = [...bills, newBillEntry];
+    setBills(updatedBills); 
+    setCurrentMonthlyData(prev => prev ? { ...prev, bills: billsToStoredBillsArray(updatedBills) } : null);
+
     setNewBillName('');
     setNewBillAmount('');
     setSelectedIncomeSourceForNewBill(undefined);
     setIsAddBillModalOpen(false);
-    toast({ title: t('home.addBillModal.toast.success.title'), description: t('home.addBillModal.toast.success.description', { billName: newBillName }) });
+    toast({ title: t('home.addBillModal.toast.success.title'), description: t('home.addBillModal.toast.success.description', { billName: newBillEntry.name }) });
   };
 
   const openIncomeSourceModal = (source: IncomeSource | null) => {
@@ -362,23 +371,26 @@ export default function HomePage() {
       toast({ variant: "destructive", title: t('generic.error'), description: t('home.incomeSources.dialog.nameLabel') + ' ' + t('home.addBillModal.validation.nameRequired') });
       return;
     }
-    if (parsedAmount < 0) { // Allow 0 for income source amount
+    if (parsedAmount < 0) { 
       toast({ variant: "destructive", title: t('generic.error'), description: t('home.incomeSources.dialog.amountLabel') + ' ' + t('home.addBillModal.validation.amountRequired') });
       return;
     }
 
-    if (currentIncomeSource) { // Editing existing source
-      setIncomeSources(prev => prev.map(s => s.id === currentIncomeSource.id ? { ...s, name: incomeSourceName, amount: parsedAmount } : s));
+    let updatedIncomeSources;
+    if (currentIncomeSource) { 
+      updatedIncomeSources = incomeSources.map(s => s.id === currentIncomeSource.id ? { ...s, name: incomeSourceName, amount: parsedAmount } : s);
       toast({ title: t('home.incomeSources.toast.updated.title'), description: t('home.incomeSources.toast.updated.description', { sourceName: incomeSourceName })});
-    } else { // Adding new source
+    } else { 
       const newSource: IncomeSource = {
         id: `income-${Date.now()}`,
         name: incomeSourceName,
         amount: parsedAmount,
       };
-      setIncomeSources(prev => [...prev, newSource]);
+      updatedIncomeSources = [...incomeSources, newSource];
       toast({ title: t('home.incomeSources.toast.added.title'), description: t('home.incomeSources.toast.added.description', { sourceName: incomeSourceName }) });
     }
+    setIncomeSources(updatedIncomeSources);
+    setCurrentMonthlyData(prev => prev ? { ...prev, incomeSources: updatedIncomeSources } : null);
     setIsIncomeSourceModalOpen(false);
   };
 
@@ -386,9 +398,18 @@ export default function HomePage() {
     const sourceToDelete = incomeSources.find(s => s.id === sourceId);
     if (!sourceToDelete) return;
 
-    setIncomeSources(prev => prev.filter(s => s.id !== sourceId));
-    // Also unassign bills from this source
-    setBills(prevBills => prevBills.map(b => b.incomeSourceId === sourceId ? { ...b, incomeSourceId: undefined } : b));
+    const updatedIncomeSources = incomeSources.filter(s => s.id !== sourceId);
+    setIncomeSources(updatedIncomeSources);
+    
+    const updatedBills = bills.map(b => b.incomeSourceId === sourceId ? { ...b, incomeSourceId: undefined } : b);
+    setBills(updatedBills);
+
+    setCurrentMonthlyData(prev => prev ? { 
+      ...prev, 
+      incomeSources: updatedIncomeSources, 
+      bills: billsToStoredBillsArray(updatedBills) 
+    } : null);
+
     toast({ title: t('home.incomeSources.toast.deleted.title'), description: t('home.incomeSources.toast.deleted.description', { sourceName: sourceToDelete.name}) });
   };
 
@@ -443,7 +464,7 @@ export default function HomePage() {
   const incomeContributionChartConfig = useMemo(() => {
     const config: ChartConfig = {};
     incomeContributionChartData.forEach(item => {
-      config[item.incomeSourceName] = { // Use incomeSourceName for unique key if names can repeat
+      config[item.incomeSourceName] = { 
         label: item.name,
         color: item.fill,
       };
@@ -577,7 +598,7 @@ export default function HomePage() {
                     type="text" 
                     value={formatCurrency(bill.amount)} 
                     onChange={(e) => handleBillAmountDisplayChange(bill.id, e.target.value)}
-                    onBlur={(e) => { /* value already updated */ }}
+                    onBlur={(e) => { /* value already updated, no need to re-parse on blur */ }}
                     placeholder={formatCurrency(0)}
                     className="w-32 text-right row-start-1 col-start-4"
                     aria-label={`${bill.name} ${t('home.addBillModal.amountLabel')}`}
@@ -747,7 +768,7 @@ export default function HomePage() {
           <Card className="shadow-lg hover:shadow-xl transition-shadow duration-300">
             <CardHeader>
               <CardTitle className="flex items-center text-2xl font-headline">
-                <DollarSign className="mr-2 h-7 w-7 text-primary" /> {/* Consider a different icon if needed */}
+                <DollarSign className="mr-2 h-7 w-7 text-primary" /> 
                 {t('home.incomeContributionChart.title')}
               </CardTitle>
               <CardDescription>{t('home.incomeContributionChart.descriptionPeriod', { month: monthOptions.find(m=>m.value === selectedMonth.toString())?.label || '', year: selectedYear.toString() })}</CardDescription>
