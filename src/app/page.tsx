@@ -35,10 +35,9 @@ const PREDEFINED_BILLS_CONFIG: BillConfig[] = [
 ];
 
 const generateMonthOptions = (t: (key: string) => string, currentLocale: Locale) => {
-  const formatPattern = 'LLLL'; // Use LLLL for standalone month name with correct casing
+  const formatPattern = 'LLLL'; 
   return Array.from({ length: 12 }, (_, i) => {
-    // Create a date for the first day of each month to format it
-    const date = new Date(2000, i, 1); // Year doesn't matter, only month
+    const date = new Date(2000, i, 1); 
     return {
       value: (i + 1).toString(),
       label: format(date, formatPattern, { locale: currentLocale === 'pt' ? ptBR : enUS }),
@@ -49,7 +48,7 @@ const generateMonthOptions = (t: (key: string) => string, currentLocale: Locale)
 const generateYearOptions = () => {
   const currentYr = getYear(new Date());
   const years = [];
-  for (let i = -5; i <= 1; i++) { // 5 years past, current year, 1 year future
+  for (let i = -5; i <= 1; i++) { 
     years.push({ value: (currentYr + i).toString(), label: (currentYr + i).toString() });
   }
   return years;
@@ -124,8 +123,13 @@ export default function HomePage() {
     try {
       const storedDataString = localStorage.getItem(LOCAL_STORAGE_KEY);
       if (storedDataString) {
-        const parsedAppStorage: AppStorage = JSON.parse(storedDataString);
-        setAppStorage(parsedAppStorage);
+        const parsedData = JSON.parse(storedDataString);
+        const validatedAppStorage: AppStorage = {
+          userLocale: (parsedData.userLocale === 'en' || parsedData.userLocale === 'pt') ? parsedData.userLocale : getLocale(),
+          defaultIncome: typeof parsedData.defaultIncome === 'number' ? parsedData.defaultIncome : 0,
+          allMonthlyData: Array.isArray(parsedData.allMonthlyData) ? parsedData.allMonthlyData : [],
+        };
+        setAppStorage(validatedAppStorage);
       } else {
         // Initialize AppStorage if nothing is in localStorage
         const initialStorage: AppStorage = {
@@ -150,7 +154,7 @@ export default function HomePage() {
   
   // Effect to load/initialize data for the selectedYear and selectedMonth
   useEffect(() => {
-    if (!isClient || !appStorage) return;
+    if (!isClient || !appStorage) return; // appStorage.allMonthlyData is guaranteed to be an array if appStorage is truthy
 
     let monthData = appStorage.allMonthlyData.find(
       (data) => data.year === selectedYear && data.month === selectedMonth
@@ -191,17 +195,17 @@ export default function HomePage() {
       userLocale: getLocale(), // Ensure locale is up-to-date
     };
     
-    setAppStorage(newAppStorage); // Update state first to avoid race conditions with display updates
+    setAppStorage(newAppStorage); 
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(newAppStorage));
 
-  }, [currentMonthlyData, isClient]); // Removed appStorage, getLocale from deps to simplify, rely on currentMonthlyData as trigger
+  }, [currentMonthlyData, isClient, getLocale]); 
 
   // Update currentMonthlyData when income state changes
   useEffect(() => {
     if (currentMonthlyData && currentMonthlyData.income !== income) {
       setCurrentMonthlyData(prev => prev ? { ...prev, income } : null);
     }
-  }, [income, currentMonthlyData]); // Added currentMonthlyData to deps
+  }, [income, currentMonthlyData]); 
 
   // Update currentMonthlyData when bills state changes
   useEffect(() => {
@@ -212,12 +216,12 @@ export default function HomePage() {
           name: bill.isCustom ? bill.name : undefined,
           isCustom: bill.isCustom,
         }));
-        // Deep comparison to avoid unnecessary updates
+        
         if (JSON.stringify(currentMonthlyData.bills) !== JSON.stringify(storedBillsData)) {
              setCurrentMonthlyData(prev => prev ? { ...prev, bills: storedBillsData } : null);
         }
     }
-  }, [bills, currentMonthlyData]); // Added currentMonthlyData to deps
+  }, [bills, currentMonthlyData]); 
 
 
   // Update bill names and income display if locale changes (or initial load)
@@ -227,9 +231,8 @@ export default function HomePage() {
           ...bill,
           name: bill.isCustom ? bill.name : (t(bill.nameKey || '') || PREDEFINED_BILLS_CONFIG.find(pb => pb.id === bill.id)?.defaultName || t('home.bills.customBillFallback'))
         })));
-        setLocalIncomeDisplay(formatCurrency(income)); // income is already numeric state
-        // Month options also need to be re-generated if locale changes for month names
-        // This is handled by monthOptions useMemo dependency on 'locale'
+        setLocalIncomeDisplay(formatCurrency(income)); 
+        
     }
   }, [t, locale, isClient, formatCurrency, income]);
 
@@ -240,14 +243,11 @@ export default function HomePage() {
 
   const handleIncomeInputBlur = () => {
     const numericValue = parseCurrency(localIncomeDisplay);
-    setIncome(numericValue); // This will trigger the useEffect to update currentMonthlyData
+    setIncome(numericValue); 
     setLocalIncomeDisplay(formatCurrency(numericValue));
   };
   
   const handleBillAmountDisplayChange = (billId: string, displayValue: string) => {
-    // Update the bill's amount as a numeric value.
-    // The input field will temporarily show the raw input.
-    // On blur, it will be formatted.
     setBills(prevBills =>
       prevBills.map(bill =>
         bill.id === billId ? { ...bill, amount: parseCurrency(displayValue) } : bill
@@ -256,26 +256,8 @@ export default function HomePage() {
   };
 
   const handleBillAmountInputBlur = (billId: string, displayValue: string) => {
-    // This function is now mainly to ensure the displayed value in the input
-    // is correctly formatted after the user finishes editing.
-    // The actual numeric amount is already updated by handleBillAmountDisplayChange.
-    // We find the bill in the *current* state to get its numeric amount for re-formatting.
     const billToUpdate = bills.find(b => b.id === billId);
-    if (billToUpdate) {
-        // Re-format the numeric amount from the state and update the input field's value.
-        // This requires managing the input field's value directly or ensuring React re-renders it.
-        // For simplicity, we'll rely on React re-rendering based on the `bills` state.
-        // The `value` prop of the Input component for bills already uses `formatCurrency(bill.amount)`.
-        // So, when `bills` state is updated with the parsed numeric value,
-        // React will re-render the Input with the correctly formatted currency string.
-        // This effect might be slightly delayed if parsing/formatting is slow, but generally okay.
-    }
-     // To ensure the input field re-renders with the formatted value from state
-     // after blur, we can trigger a state update on the bills array if needed,
-     // or rely on the fact that the value prop of the Input is bound to formatCurrency(bill.amount).
-     // Forcing a re-render explicitly might be:
-     // setBills(prevBills => [...prevBills]); 
-     // But this is often not necessary if the value prop is correctly bound.
+    // No explicit re-render trigger needed here, value prop of Input handles it
   };
 
 
@@ -288,9 +270,9 @@ export default function HomePage() {
   }, [income, totalExpenses]);
 
   const expenseRatio = useMemo(() => {
-    if (income === 0 && totalExpenses === 0) return 0; // Avoid NaN if income is 0 but expenses also 0
-    if (income === 0) return totalExpenses > 0 ? 1000 : 0; // Represent very high ratio if income is 0 but expenses exist
-    return Math.min(Math.max(0, (totalExpenses / income) * 100), 1000); // Allow ratio > 100
+    if (income === 0 && totalExpenses === 0) return 0; 
+    if (income === 0) return totalExpenses > 0 ? 1000 : 0; 
+    return Math.min(Math.max(0, (totalExpenses / income) * 100), 1000); 
   }, [income, totalExpenses]);
 
   const handleGenerateInsights = useCallback(async () => {
@@ -315,7 +297,6 @@ export default function HomePage() {
     try {
       const result: SpendingInsightsOutput = await getSpendingInsights(insightInput);
       setInsights(result.insights);
-      // Optionally save insights to currentMonthlyData here if needed for persistence across sessions for the same month
     } catch (error) {
       console.error("Error fetching spending insights:", error);
       const errorMessage = t('toast.insightsFailed.description');
@@ -348,7 +329,7 @@ export default function HomePage() {
       amount: parsedAmount,
       isCustom: true,
     };
-    setBills(prevBills => [...prevBills, newBill]); // This will trigger useEffect to save
+    setBills(prevBills => [...prevBills, newBill]); 
     setNewBillName('');
     setNewBillAmount('');
     setIsAddBillModalOpen(false);
@@ -368,7 +349,7 @@ export default function HomePage() {
       .map((bill, index) => ({
         name: bill.name,
         value: bill.amount,
-        fill: `hsl(var(--chart-${(index % 5) + 1}))`, // Cycle through 5 chart colors
+        fill: `hsl(var(--chart-${(index % 5) + 1}))`, 
       }));
   }, [bills]);
 
@@ -512,7 +493,7 @@ export default function HomePage() {
                         onChange={(e) => setNewBillAmount(e.target.value)} 
                         onBlur={(e) => {
                             const numericValue = parseCurrency(e.target.value);
-                            setNewBillAmount(formatCurrency(numericValue)); // Display formatted
+                            setNewBillAmount(formatCurrency(numericValue)); 
                         }}
                         placeholder={formatCurrency(0)}
                       />
