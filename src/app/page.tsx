@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { PieChart as ChartIcon, Droplet, Zap, Wifi, Home, DollarSign, LineChart, AlertCircle, Loader2, Brain, Receipt, PlusCircle, CalendarDays, Edit3, Trash2, Landmark, ArrowRightCircle } from 'lucide-react';
-import { Pie, PieChart, Cell, ResponsiveContainer } from 'recharts'; // Legend removed as per user instructions to rely on slice labels
+import { Pie, PieChart, Cell, ResponsiveContainer } from 'recharts';
 import { ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from "@/components/ui/chart";
 import type { Bill, BillConfig, StoredBillData, MonthlyData, AppStorage, Locale, IncomeSource } from '@/types';
 import { getSpendingInsights } from '@/ai/flows/spending-insights';
@@ -71,6 +71,8 @@ const generateYearOptions = () => {
   return years;
 };
 
+const DEFAULT_LOCALE: Locale = 'en';
+
 export default function HomePage() {
   const { t, formatCurrency, parseCurrency, getLocale, locale } = useLocalization();
   const { toast } = useToast();
@@ -111,7 +113,7 @@ export default function HomePage() {
 
   const yearOptions = useMemo(() => generateYearOptions(), []);
   const monthOptions = useMemo(() => generateMonthOptions(t, locale), [t, locale]);
-  const DEFAULT_LOCALE: Locale = 'en';
+  
 
 
   const getDecimalSeparator = useCallback(() => (locale === 'pt' ? ',' : '.'), [locale]);
@@ -202,21 +204,20 @@ useEffect(() => {
 
     async function loadData() {
       try {
-        let data = await getMonthlyData(selectedYear, selectedMonth);
-        let finalDataToSet: MonthlyData;
+        let existingMonthData = await getMonthlyData(selectedYear, selectedMonth);
+        let finalMonthData: MonthlyData;
 
-        if (data) {
+        if (existingMonthData) {
           // Ensure incomeSources and bills are arrays
-          data.incomeSources = Array.isArray(data.incomeSources) ? data.incomeSources : [];
-          data.bills = Array.isArray(data.bills) ? data.bills : [];
-          finalDataToSet = data;
-
-          // Ensure primary income source exists and is up-to-date with settings
-           const primaryIncomeNameFromSettings = userSettings.defaultIncomeSourceName?.trim()
+          const resolvedIncomeSources = Array.isArray(existingMonthData.incomeSources) ? existingMonthData.incomeSources : [];
+          const resolvedStoredBills = Array.isArray(existingMonthData.bills) ? existingMonthData.bills : [];
+          
+          // Ensure primary income source logic
+          const primaryIncomeNameFromSettings = userSettings.defaultIncomeSourceName?.trim()
             ? userSettings.defaultIncomeSourceName
             : t('home.incomeSources.defaultPrimaryName');
           
-          let primarySource = finalDataToSet.incomeSources.find(s => s.id.startsWith('primary-'));
+          let primarySource = resolvedIncomeSources.find(s => s.id.startsWith('primary-'));
 
           if (!primarySource) {
             primarySource = {
@@ -224,21 +225,25 @@ useEffect(() => {
               name: primaryIncomeNameFromSettings,
               amount: userSettings.defaultIncome || 0,
             };
-            finalDataToSet.incomeSources.unshift(primarySource);
+            resolvedIncomeSources.unshift(primarySource);
           } else {
              if (primarySource.name === 'Primary Income' || primarySource.name === t('home.incomeSources.defaultPrimaryName', undefined, {locale: 'en'}) || primarySource.name === t('home.incomeSources.defaultPrimaryName', undefined, {locale: 'pt'})) {
                 primarySource.name = primaryIncomeNameFromSettings;
             }
-            // Only update amount if it's 0 and settings have a default amount > 0.
-            // This respects if user manually set it to 0 for the month.
             if (primarySource.amount === 0 && (userSettings.defaultIncome || 0) > 0) {
                 primarySource.amount = userSettings.defaultIncome || 0;
             }
           }
-          // Ensure uniqueness
-          finalDataToSet.incomeSources = Array.from(new Map(finalDataToSet.incomeSources.map(item => [item.id, item])).values());
-          finalDataToSet.bills = Array.from(new Map(finalDataToSet.bills.map(item => [item.id, item])).values());
+          
+          // Ensure uniqueness after potential modifications
+          const uniqueIncomeSources = Array.from(new Map(resolvedIncomeSources.map(item => [item.id, item])).values());
+          const uniqueStoredBills = Array.from(new Map((existingMonthData.bills || []).map(item => [item.id, item])).values());
 
+          finalMonthData = {
+            ...existingMonthData,
+            incomeSources: uniqueIncomeSources,
+            bills: uniqueStoredBills,
+          };
 
         } else {
           // No data in DB, initialize new month data
@@ -252,20 +257,20 @@ useEffect(() => {
             amount: userSettings.defaultIncome || 0
           }];
           
-          finalDataToSet = {
+          finalMonthData = {
             year: selectedYear,
             month: selectedMonth,
             incomeSources: initialIncomeSources,
             bills: [], // Bills start empty for a new month
           };
           // Save this newly initialized data to DB
-          const saved = await saveMonthlyData(finalDataToSet);
-          finalDataToSet = saved; // Use the returned data with _id
+          const saved = await saveMonthlyData(finalMonthData);
+          finalMonthData = saved; // Use the returned data with _id
         }
         
-        setCurrentMonthlyData(finalDataToSet);
-        setIncomeSources(finalDataToSet.incomeSources);
-        setBills(mapStoredDataToBills(finalDataToSet.bills));
+        setCurrentMonthlyData(finalMonthData);
+        setIncomeSources(finalMonthData.incomeSources);
+        setBills(mapStoredDataToBills(finalMonthData.bills));
         setInsights(null);
         setErrorInsights(null);
 
@@ -276,12 +281,14 @@ useEffect(() => {
          const primaryIncomeName = userSettings.defaultIncomeSourceName?.trim()
             ? userSettings.defaultIncomeSourceName
             : t('home.incomeSources.defaultPrimaryName');
+        
+        const fallbackIncomeSources = [{id: `primary-${selectedYear}-${selectedMonth}-${Date.now()}`, name: primaryIncomeName, amount: userSettings.defaultIncome || 0}];
         setCurrentMonthlyData({
             year: selectedYear, month: selectedMonth, 
-            incomeSources: [{id: `primary-${Date.now()}`, name: primaryIncomeName, amount: userSettings.defaultIncome || 0}], 
+            incomeSources: fallbackIncomeSources, 
             bills: []
         });
-        setIncomeSources([{id: `primary-${Date.now()}`, name: primaryIncomeName, amount: userSettings.defaultIncome || 0}]);
+        setIncomeSources(fallbackIncomeSources);
         setBills([]);
       } finally {
         setIsLoadingMonthlyData(false);
@@ -314,7 +321,7 @@ useEffect(() => {
         }
       }
     }, 1500); // Debounce for 1.5 seconds
-  }, [currentMonthlyData, incomeSources, bills, toast]);
+  }, [currentMonthlyData, incomeSources, bills, toast, t]);
 
   // Trigger debounced save when incomeSources or bills UI state changes
   useEffect(() => {
@@ -332,7 +339,7 @@ useEffect(() => {
           name: bill.isCustom ? bill.name : (t(bill.nameKey || PREDEFINED_BILLS_CONFIG.find(pb => pb.id === bill.id)?.nameKey || '') || PREDEFINED_BILLS_CONFIG.find(pb => pb.id === bill.id)?.defaultName || t('home.bills.customBillFallback'))
         })));
     }
-  }, [t, locale, isClient, PREDEFINED_BILLS_CONFIG]); // Removed `bills` from dependencies
+  }, [t, locale, isClient]); 
 
 
   const handleBillAmountRawChange = (billId: string, rawValue: string) => {
@@ -353,14 +360,13 @@ useEffect(() => {
       
       const updatedBills = prevBills.map(bill => {
         if (bill.id === billId) {
-          const { rawAmountDisplay, ...rest } = bill;
+          const { rawAmountDisplay, ...rest } = bill; // Remove rawAmountDisplay after parsing
           return { ...rest, amount: numericValue };
         }
         return bill;
       });
       return updatedBills;
     });
-    // scheduleSaveToDb(); // Data will be saved by useEffect watching `bills`
   };
   
 
@@ -370,7 +376,6 @@ useEffect(() => {
         bill.id === billId ? { ...bill, incomeSourceId: sourceId === "unassigned" ? undefined : sourceId } : bill
       )
     );
-    // scheduleSaveToDb();
   };
 
 
@@ -451,14 +456,16 @@ useEffect(() => {
     setNewBillName(t(config.nameKey) || config.defaultName); 
     setNewBillIcon(config.icon);
     setNewBillIsCustom(false); 
-    setNewBillPredefinedId(config.id); 
+    setNewBillPredefinedId(config.id);
+    setNewBillAmountRaw(''); // Clear amount for user to input
   };
   
   const handleNewBillNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setNewBillName(e.target.value);
-    if (newBillPredefinedId) { 
+    if (newBillPredefinedId && e.target.value !== (t(PREDEFINED_BILLS_CONFIG.find(c => c.id === newBillPredefinedId)?.nameKey || '') || PREDEFINED_BILLS_CONFIG.find(c => c.id === newBillPredefinedId)?.defaultName)) { 
       setNewBillIsCustom(true); 
-      setNewBillIcon(Receipt); 
+      setNewBillIcon(Receipt);
+      setNewBillPredefinedId(null);
     }
   };
 
@@ -467,7 +474,10 @@ useEffect(() => {
   };
 
   const handleAddNewBillAmountBlur = () => {
-    // Raw value is parsed on submit
+    // The raw value is parsed on submit, display formatting isn't strictly needed here as it's a modal
+    // but if desired, could format it:
+    // const parsed = parseCurrency(newBillAmountRaw);
+    // setNewBillAmountRaw(parsed > 0 ? formatCurrency(parsed) : '');
   };
 
 
@@ -506,7 +516,6 @@ useEffect(() => {
     setBills(prevBills => [...prevBills, newBillEntry]);
     setIsAddBillModalOpen(false);
     toast({ title: t('home.addBillModal.toast.success.title'), description: t('home.addBillModal.toast.success.description', { billName: newBillEntry.name }) });
-    // scheduleSaveToDb();
   };
 
   const handleDeleteBill = (billIdToDelete: string) => {
@@ -515,7 +524,6 @@ useEffect(() => {
 
     setBills(prevBills => prevBills.filter(bill => bill.id !== billIdToDelete));
     toast({ title: t('home.deleteBillModal.toast.success.title'), description: t('home.deleteBillModal.toast.success.description', { billName: billToDelete.name }) });
-    // scheduleSaveToDb();
   };
 
   const openIncomeSourceModal = (source: IncomeSource | null) => {
@@ -564,7 +572,6 @@ useEffect(() => {
     }
     setIncomeSources(updatedIncomeSources);
     setIsIncomeSourceModalOpen(false);
-    // scheduleSaveToDb();
   };
 
   const handleDeleteIncomeSource = (sourceId: string) => {
@@ -583,7 +590,6 @@ useEffect(() => {
     setIncomeSources(prevSources => prevSources.filter(s => s.id !== sourceId));
     setBills(prevBills => prevBills.map(b => b.incomeSourceId === sourceId ? { ...b, incomeSourceId: undefined } : b));
     toast({ title: t('home.incomeSources.toast.deleted.title'), description: t('home.incomeSources.toast.deleted.description', { sourceName: sourceToDelete.name}) });
-    // scheduleSaveToDb();
   };
 
   const handleReplicateBill = useCallback(async (billToReplicate: Bill) => {
@@ -602,7 +608,7 @@ useEffect(() => {
         const replicatedStoredBill = billToStoredBill(billToReplicate);
 
         if (nextMonthDataFromDB) {
-            const billExists = nextMonthDataFromDB.bills.some(b => b.id === replicatedStoredBill.id);
+            const billExists = nextMonthDataFromDB.bills.some(b => b.id === replicatedStoredBill.id && !b.isCustom && !replicatedStoredBill.isCustom);
             if (!billExists) {
                 nextMonthDataFromDB.bills.push(replicatedStoredBill);
             } else {
@@ -636,9 +642,9 @@ useEffect(() => {
 
     } catch (error) {
         console.error("Error replicating bill:", error);
-        toast({ variant: "destructive", title: "Replication Failed", description: (error as Error).message });
+        toast({ variant: "destructive", title: t('toast.errorReplicatingBill.title'), description: (error as Error).message });
     }
-}, [selectedYear, selectedMonth, userSettings, t, locale, toast, currentMonthlyData]); // Added currentMonthlyData
+}, [selectedYear, selectedMonth, userSettings, t, locale, toast, currentMonthlyData]); 
   
 
   const topExpenses = useMemo(() => {
@@ -818,14 +824,16 @@ useEffect(() => {
               {bills.map(bill => (
                 <div 
                   key={bill.id} 
-                  className="flex flex-col sm:flex-row sm:items-center sm:gap-x-4 gap-y-2 p-3 border-b last:border-b-0 hover:bg-muted/50 transition-colors rounded-md"
+                  className="flex flex-col sm:flex-row sm:items-center sm:gap-x-4 p-3 border-b last:border-b-0 hover:bg-muted/50 transition-colors rounded-md"
                 >
-                  <div className="flex items-center gap-3 flex-shrink-0 w-full sm:w-auto sm:flex-none">
+                  {/* Icon and Name group (Mobile: full width; Desktop: auto) */}
+                  <div className="flex items-center gap-3 w-full sm:w-auto sm:flex-none mb-2 sm:mb-0">
                     <bill.icon className="h-7 w-7 text-accent flex-shrink-0"/>
                     <p className="font-medium truncate text-card-foreground flex-1">{bill.name}</p>
                   </div>
 
-                  <div className="w-full sm:order-2 sm:flex-1 min-w-0 md:max-w-[220px]">
+                  {/* Income Source Select (Mobile: full width below name; Desktop: middle, takes space) */}
+                  <div className="w-full sm:order-2 sm:flex-1 min-w-0 md:max-w-[220px] mb-2 sm:mb-0">
                     <Select
                       value={bill.incomeSourceId || "unassigned"}
                       onValueChange={(value) => handleBillIncomeSourceChange(bill.id, value)}
@@ -846,8 +854,9 @@ useEffect(() => {
                     </Select>
                   </div>
                   
+                  {/* Amount Input and Action Buttons group (Mobile: full width, side-by-side; Desktop: end, side-by-side) */}
                   <div className="flex items-center justify-between w-full gap-2 sm:order-3 sm:w-auto sm:gap-1 sm:ml-auto">
-                    <div className="flex-grow sm:flex-grow-0 sm:w-28">
+                    <div className="flex-grow sm:flex-grow-0 sm:w-28"> {/* Amount input */}
                       <Input
                         id={`bill-amount-${bill.id}`}
                         type="text" 
@@ -860,7 +869,7 @@ useEffect(() => {
                       />
                     </div>
 
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1"> {/* Action buttons */}
                       <TooltipProvider delayDuration={100}>
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -869,7 +878,7 @@ useEffect(() => {
                               size="icon"
                               onClick={() => handleReplicateBill(bill)}
                               aria-label={t('home.bills.tooltip.replicateBill')}
-                              className="h-8 w-8 sm:h-9 sm:w-9" 
+                              className="h-9 w-9" 
                             >
                               <ArrowRightCircle className="h-5 w-5"/>
                             </Button>
@@ -885,7 +894,7 @@ useEffect(() => {
                                       <Button
                                           variant="ghost"
                                           size="icon"
-                                          className="text-destructive hover:text-destructive/90 hover:bg-destructive/10 h-8 w-8 sm:h-9 sm:w-9"
+                                          className="text-destructive hover:text-destructive/90 hover:bg-destructive/10 h-9 w-9"
                                           aria-label={t('home.bills.tooltip.deleteBill')}
                                       >
                                           <Trash2 className="h-5 w-5"/>
@@ -987,8 +996,21 @@ useEffect(() => {
               {expenseChartData.length > 0 ? (
                 <ChartContainer config={expenseChartConfig} className="mx-auto aspect-square h-[250px] sm:h-[300px] w-full">
                   <PieChart>
-                    <ChartTooltip content={<ChartTooltipContent hideLabel />} />
-                    <Pie data={expenseChartData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} labelLine={false} label={({ percent }) => `${(percent * 100).toFixed(0)}%`}>
+                    <ChartTooltip content={<ChartTooltipContent nameKey="name" hideLabel />} />
+                    <Pie 
+                        data={expenseChartData} 
+                        dataKey="value" 
+                        nameKey="name" 
+                        cx="50%" 
+                        cy="50%" 
+                        outerRadius={80} 
+                        labelLine={false} 
+                        label={({ percent, name }) => {
+                            const percentage = (percent * 100).toFixed(0);
+                            // Only show label if percentage is significant enough to avoid clutter
+                            return parseInt(percentage) > 3 ? `${name}: ${percentage}%` : `${percentage}%`; 
+                        }}
+                    >
                       {expenseChartData.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.fill} />
                       ))}
