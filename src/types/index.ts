@@ -10,8 +10,8 @@ export interface BillConfig {
 
 export interface Bill {
   id: string;
-  name: string; 
-  nameKey?: string; 
+  name: string;
+  nameKey?: string;
   icon: LucideIcon;
   amount: number;
   isCustom?: boolean;
@@ -21,9 +21,9 @@ export interface Bill {
 export interface StoredBillData {
   id: string;
   amount: number;
-  name?: string; 
+  name?: string;
   isCustom?: boolean;
-  incomeSourceId?: string; 
+  incomeSourceId?: string;
 }
 
 export interface IncomeSource {
@@ -36,7 +36,7 @@ export interface IncomeSource {
 export interface MonthlyData {
   year: number;
   month: number; // 1 for January, 12 for December
-  incomeSources: IncomeSource[]; // Changed from single income to array of sources
+  incomeSources: IncomeSource[];
   bills: StoredBillData[];
 }
 
@@ -44,6 +44,7 @@ export type Locale = 'en' | 'pt';
 
 export interface AppStorage {
   userLocale: Locale;
-  defaultIncome?: number; 
-  allMonthlyData: MonthlyData[]; 
+  defaultIncome?: number;
+  defaultIncomeSourceName?: string; // New: Custom name for the default/primary income source
+  allMonthlyData: MonthlyData[];
 }
