@@ -2,7 +2,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { AUTH_COOKIE_NAME } from '@/lib/config';
 import { verifyUserToken } from '@/lib/authUtils';
-import type { UserJWTPayload } from '@/types';
+import type { UserJWTPayload } from '@/types'; // Ensure this line is present
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -59,4 +59,3 @@ export const config = {
     '/((?!_next/static|_next/image|favicon.ico|images|api/genkit/DEFAULT_FLOW_RUNNER_ADDRESS).*)',
   ],
 };
-
