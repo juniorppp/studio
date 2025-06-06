@@ -7,7 +7,7 @@ import enTranslations from '@/locales/en.json';
 import ptTranslations from '@/locales/pt.json';
 
 type Locale = 'en' | 'pt';
-type Translations = Record<string, string | Record<string, string>>; // Basic nested structure
+type Translations = Record<string, string | Record<string, string>>; 
 type TranslationValues = Record<string, string | number>;
 
 interface LocalizationContextType {
@@ -35,16 +35,17 @@ export const LocalizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   useEffect(() => {
     const storedLang = localStorage.getItem(LOCAL_STORAGE_LANG_KEY) as Locale | null;
+    let initialLocale = DEFAULT_LOCALE;
     if (storedLang && (storedLang === 'en' || storedLang === 'pt')) {
-      setLocaleState(storedLang);
-      if (typeof document !== 'undefined') {
-        document.documentElement.lang = storedLang;
-      }
-    } else if (typeof document !== 'undefined') {
-        document.documentElement.lang = DEFAULT_LOCALE;
+      initialLocale = storedLang;
+    }
+    
+    setLocaleState(initialLocale); // Update React state
+    if (typeof document !== 'undefined') { // Update HTML lang attribute
+      document.documentElement.lang = initialLocale;
     }
     setIsInitialized(true);
-  }, []);
+  }, []); // Runs once on mount
 
   const setLocale = useCallback((newLocale: Locale) => {
     setLocaleState(newLocale);
@@ -58,16 +59,13 @@ export const LocalizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const t = useCallback((key: string, values?: TranslationValues): string => {
     let text: string | undefined;
-
-    // Attempt to get translation from the current locale
     const currentLocaleTranslations = translations[locale];
     if (currentLocaleTranslations) {
       text = currentLocaleTranslations[key] as string | undefined;
     }
 
-    // If not found in current locale, try the default locale
     if (text === undefined) {
-      if (locale !== DEFAULT_LOCALE) { // Only warn if we are actually falling back
+      if (locale !== DEFAULT_LOCALE) { 
         console.warn(`Translation key "${key}" not found for locale "${locale}". Falling back to default locale ('${DEFAULT_LOCALE}').`);
       }
       const defaultLocaleTranslations = translations[DEFAULT_LOCALE];
@@ -76,13 +74,11 @@ export const LocalizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       }
     }
     
-    // If still not found, log an error and return the key itself
     if (text === undefined) {
         console.error(`Translation key "${key}" not found in default locale ('${DEFAULT_LOCALE}') or current locale ('${locale}'). Returning key.`);
         return key; 
     }
 
-    // Replace placeholders if any
     if (values) {
       Object.keys(values).forEach((placeholder) => {
         text = text!.replace(new RegExp(`{${placeholder}}`, 'g'), String(values[placeholder]));
@@ -119,3 +115,5 @@ export const LocalizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     </LocalizationContext.Provider>
   );
 };
+
+    

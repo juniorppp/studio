@@ -21,13 +21,13 @@ export function SiteHeader() {
   useEffect(() => {
     const fetchSession = async () => {
       setIsLoadingSession(true);
-      console.log('[SiteHeader] Attempting to fetch session...');
+      // console.log('[SiteHeader] Attempting to fetch session...');
       try {
         const currentSession = await getUserSession();
-        console.log('[SiteHeader] Fetched session result:', currentSession);
+        // console.log('[SiteHeader] Fetched session result:', currentSession);
         setSession(currentSession);
       } catch (error) {
-        console.error("[SiteHeader] Failed to fetch session in useEffect:", error);
+        // console.error("[SiteHeader] Failed to fetch session in useEffect:", error);
         setSession(null);
       } finally {
         setIsLoadingSession(false);
@@ -37,12 +37,12 @@ export function SiteHeader() {
   }, []);
 
   const handleLogout = async () => {
-    console.log('[SiteHeader] Logging out...');
+    // console.log('[SiteHeader] Logging out...');
     await logoutUser();
-    setSession(null); // Update client-side state
+    setSession(null); 
     // router.push('/login'); // logoutUser action already redirects
-    router.refresh(); // Ensure page reloads with new auth state
-    console.log('[SiteHeader] Logout complete, session set to null, router refreshed.');
+    router.refresh(); 
+    // console.log('[SiteHeader] Logout complete, session set to null, router refreshed.');
   };
 
   return (
@@ -83,7 +83,7 @@ export function SiteHeader() {
             <Button variant="ghost" size="sm" disabled>...</Button>
           ) : session ? (
             <>
-              <span className="text-sm text-muted-foreground hidden sm:inline">
+              <span className="text-sm text-muted-foreground"> {/* Temporarily removed 'hidden sm:inline' for debugging */}
                 {t('nav.welcomeUser', { username: session.username })}
               </span>
               <Button variant="outline" size="sm" onClick={handleLogout}>
@@ -112,3 +112,5 @@ export function SiteHeader() {
     </header>
   );
 }
+
+    

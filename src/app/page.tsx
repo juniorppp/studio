@@ -28,9 +28,9 @@ import { format, getYear, getMonth, addMonths } from 'date-fns';
 import { enUS, ptBR } from 'date-fns/locale';
 import { getMonthlyData, saveMonthlyData } from '@/actions/financial-data';
 import { getUserSession } from '@/actions/auth';
-import { getUserSettings } from '@/actions/user-settings'; // Assuming you have this action
+import { getUserSettings } from '@/actions/user-settings';
 
-const DEFAULT_LOCALE_PAGE: Locale = 'en'; // Renamed to avoid conflict if any global DEFAULT_LOCALE exists
+const DEFAULT_LOCALE_PAGE: Locale = 'en';
 
 const PREDEFINED_BILLS_CONFIG: BillConfig[] = [
   { id: 'water', nameKey: 'home.bills.water', defaultName: 'Water Bill', icon: Droplet },
@@ -114,9 +114,14 @@ export default function HomePage() {
   
   const dataSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Load session and user settings
   useEffect(() => {
     setIsClient(true);
+  }, []);
+
+  // Load session and user settings
+  useEffect(() => {
+    if (!isClient) return;
+
     const loadAuthData = async () => {
       setIsLoadingAuth(true);
       const currentSession = await getUserSession();
@@ -129,20 +134,19 @@ export default function HomePage() {
       try {
         const settings = await getUserSettings(currentSession.userId);
         setUserSettings(settings);
-        if (settings?.userLocale && settings.userLocale !== getLocale()) {
-          setLocale(settings.userLocale); // Sync localization context with user's preference
+        if (settings?.userLocale && settings.userLocale !== locale) { // Use locale from context directly
+          setLocale(settings.userLocale); 
         }
       } catch (error) {
-        console.error("Failed to load user settings:", error);
+        console.error("Failed to load user settings in HomePage:", error);
         toast({ variant: "destructive", title: t('toast.errorLoadingSettings.title'), description: (error as Error).message });
-        // Fallback to default settings structure if fetch fails
-        setUserSettings({ userId: currentSession.userId, userLocale: getLocale(), defaultIncome: 0, defaultIncomeSourceName: '' });
+        setUserSettings({ userId: currentSession.userId, userLocale: locale, defaultIncome: 0, defaultIncomeSourceName: '' });
       } finally {
         setIsLoadingAuth(false);
       }
     };
     loadAuthData();
-  }, [router, toast, t, getLocale, setLocale]);
+  }, [isClient, router, toast, setLocale, locale]); // Depends on setLocale and locale from context for sync
 
 
   const yearOptions = useMemo(() => generateYearOptions(), []);
@@ -314,11 +318,11 @@ useEffect(() => {
       clearTimeout(dataSaveTimeoutRef.current);
     }
     dataSaveTimeoutRef.current = setTimeout(async () => {
-      if (currentMonthlyData && session?.userId) { // Ensure session and userId exist
+      if (currentMonthlyData && session?.userId) { 
         try {
           const dataToSave: MonthlyData = {
             ...currentMonthlyData,
-            userId: session.userId, // Ensure userId is part of the data to save
+            userId: session.userId, 
             incomeSources: incomeSources, 
             bills: billsToStoredBillsArray(bills.map(b => ({...b, amount: b.amount || 0}))),
           };
@@ -340,14 +344,13 @@ useEffect(() => {
 
 
    useEffect(() => {
-    // Translate bill names when locale changes or bills are loaded
     if (isClient && bills.length > 0) {
         setBills(currentBills => currentBills.map(bill => ({
           ...bill,
           name: bill.isCustom ? bill.name : (t(bill.nameKey || PREDEFINED_BILLS_CONFIG.find(pb => pb.id === bill.id)?.nameKey || '') || PREDEFINED_BILLS_CONFIG.find(pb => pb.id === bill.id)?.defaultName || t('home.bills.customBillFallback'))
         })));
     }
-  }, [t, locale, isClient]); // Removed bills from dependencies to avoid loop, mapStoredDataToBills handles initial translation
+  }, [t, locale, isClient]); 
 
   const handleBillAmountRawChange = (billId: string, rawValue: string) => {
     const sanitized = sanitizeNumericInput(rawValue);
@@ -363,11 +366,10 @@ useEffect(() => {
       prevBills.map(bill => {
         if (bill.id === billId) {
           let displayValue = bill.rawAmountDisplay || '';
-          if (bill.amount === 0) {
-            displayValue = ''; // Show empty for zero for easier typing
+          if (bill.amount === 0 && bill.rawAmountDisplay === formatCurrency(0)) { // Check if it's exactly formatted zero
+            displayValue = ''; 
           } else {
-            // Ensure it's a plain number string for editing
-            displayValue = sanitizeNumericInput(String(bill.amount).replace('.', getDecimalSeparator()));
+            displayValue = sanitizeNumericInput(bill.rawAmountDisplay || String(bill.amount));
           }
           return { ...bill, rawAmountDisplay: displayValue };
         }
@@ -536,14 +538,18 @@ useEffect(() => {
   const handleDeleteBill = (billIdToDelete: string) => {
     const billToDelete = bills.find(b => b.id === billIdToDelete);
 
+    console.log(`[DEBUG] Attempting to delete bill with ID: '${billIdToDelete}'`);
     if (!billToDelete) {
       console.error(`[DEBUG] Bill with ID '${billIdToDelete}' not found for deletion. Current bills:`, bills.map(b => b.id));
       toast({ variant: "destructive", title: t('generic.error'), description: `Bill not found for deletion. ID: ${billIdToDelete}`});
       return;
     }
-
+    console.log('[DEBUG] Bill found for deletion:', billToDelete);
+    
     setBills(prevBills => {
+      console.log('[DEBUG] Previous bills count:', prevBills.length, 'IDs:', prevBills.map(b => b.id));
       const newBills = prevBills.filter(bill => bill.id !== billIdToDelete);
+      console.log('[DEBUG] New bills count after filter:', newBills.length, 'IDs:', newBills.map(b => b.id));
       if (prevBills.length === newBills.length && prevBills.length > 0) {
           console.warn(`[DEBUG] Filter with ID '${billIdToDelete}' did not remove any bills. Please check ID matching carefully.`);
       }
@@ -857,7 +863,7 @@ useEffect(() => {
                     <bill.icon className="h-7 w-7 text-accent flex-shrink-0"/>
                     <p className="font-medium truncate text-card-foreground flex-1">{bill.name}</p>
                   </div>
-
+                  
                   <div className="flex flex-row flex-wrap items-center justify-end gap-2 w-full sm:w-auto mt-2 sm:mt-0 sm:order-2">
                     <div className="min-w-[140px] flex-auto xs:flex-initial xs:w-auto sm:max-w-[170px] md:max-w-[190px]">
                       <Select
@@ -1246,3 +1252,5 @@ useEffect(() => {
     </div>
   );
 }
+
+    
