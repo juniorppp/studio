@@ -118,21 +118,28 @@ export default function HomePage() {
 
   const sanitizeNumericInput = useCallback((value: string) => {
     const decimalSeparator = getDecimalSeparator();
-    // Allow only digits and the specific decimal separator.
-    // If the value is just the decimal separator, keep it.
-    if (value === decimalSeparator) return value;
+    if (value === decimalSeparator) return value; // Allow typing just the separator
 
+    // Remove anything not a digit or the allowed decimal separator
     const regex = new RegExp(`[^0-9${decimalSeparator === '.' ? '\\.' : decimalSeparator}]`, 'g');
     let sanitized = value.replace(regex, '');
   
-    // Ensure only one decimal separator exists
+    // Ensure only one decimal separator
     const parts = sanitized.split(decimalSeparator);
     if (parts.length > 2) {
       sanitized = parts[0] + decimalSeparator + parts.slice(1).join('');
     }
     // Prevent leading multiple zeros unless it's "0" or "0," or "0."
-    if (sanitized.startsWith('0') && sanitized.length > 1 && sanitized[1] !== decimalSeparator) {
+     if (sanitized.length > 1 && sanitized.startsWith('0') && sanitized[1] !== decimalSeparator) {
         sanitized = sanitized.substring(1);
+        // Handle cases like "00" -> "0" or "00.1" -> "0.1"
+        while (sanitized.length > 1 && sanitized.startsWith('0') && sanitized[1] !== decimalSeparator) {
+            sanitized = sanitized.substring(1);
+        }
+    }
+    // if it's just "00" or "000", make it "0"
+    if (/^0+$/.test(sanitized) && sanitized.length > 1) {
+        sanitized = "0";
     }
 
 
@@ -142,12 +149,13 @@ export default function HomePage() {
 
   const mapStoredDataToBills = useCallback((storedBills: StoredBillData[]): Bill[] => {
     const mapped = storedBills.map(storedBill => {
+      const amount = storedBill.amount || 0;
       const baseBill = {
         id: storedBill.id,
-        amount: storedBill.amount || 0,
+        amount: amount,
         isCustom: storedBill.isCustom,
         incomeSourceId: storedBill.incomeSourceId,
-        rawAmountDisplay: formatCurrency(storedBill.amount || 0) // Initialize rawAmountDisplay
+        rawAmountDisplay: formatCurrency(amount) 
       };
       if (storedBill.isCustom) {
         return {
@@ -314,7 +322,7 @@ useEffect(() => {
           const dataToSave: MonthlyData = {
             ...currentMonthlyData,
             incomeSources: incomeSources, 
-            bills: billsToStoredBillsArray(bills.map(b => ({...b, amount: b.amount || 0}))), // Ensure amount is number
+            bills: billsToStoredBillsArray(bills.map(b => ({...b, amount: b.amount || 0}))),
           };
           const saved = await saveMonthlyData(dataToSave);
           setCurrentMonthlyData(saved); 
@@ -324,7 +332,7 @@ useEffect(() => {
         }
       }
     }, 1500); 
-  }, [currentMonthlyData, incomeSources, bills, toast, t]);
+  }, [currentMonthlyData, incomeSources, bills, toast]);
 
   useEffect(() => {
     if (!isLoadingMonthlyData && isClient && currentMonthlyData) { 
@@ -342,53 +350,54 @@ useEffect(() => {
     }
   }, [t, locale, isClient]); 
 
-
   const handleBillAmountRawChange = (billId: string, rawValue: string) => {
-    const sanitizedValue = sanitizeNumericInput(rawValue);
-    let numericValue = 0;
-    let formattedDisplay = '';
-  
-    if (sanitizedValue === '' && rawValue === '') { // User cleared input
-      numericValue = 0;
-      formattedDisplay = '';
-    } else if (sanitizedValue) {
-      // If sanitized is just the separator, or "0" + separator, keep it as is for display
-      // This allows typing "0." or "0," or just "."
-      if (sanitizedValue === getDecimalSeparator() || (sanitizedValue.startsWith('0') && sanitizedValue.length === 2 && sanitizedValue[1] === getDecimalSeparator())) {
-        numericValue = 0; // Or parse based on "0." later if needed.
-        formattedDisplay = sanitizedValue;
-      } else {
-        const parsableString = sanitizedValue.replace(getDecimalSeparator(), '.');
-        const parsed = parseFloat(parsableString);
-        if (!isNaN(parsed)) {
-          numericValue = parsed;
-          formattedDisplay = formatCurrency(numericValue);
-        } else {
-          // Could not parse (e.g. "1.2.3" after sanitization "1.23" -> parsed 1.23)
-          // This case might be rare if sanitizeNumericInput is robust
-          numericValue = 0; // Fallback
-          formattedDisplay = sanitizedValue; // Show what user typed if it's partially valid
-        }
-      }
-    } else {
-       // rawValue was something like "abc", sanitized is ""
-       numericValue = 0;
-       formattedDisplay = '';
-    }
-  
+    const sanitized = sanitizeNumericInput(rawValue);
+    const numericValue = parseCurrency(sanitized); // Use parseCurrency to correctly interpret locale-specific numbers
+
     setBills(prevBills =>
       prevBills.map(bill =>
-        bill.id === billId ? { ...bill, amount: numericValue, rawAmountDisplay: formattedDisplay } : bill
+        bill.id === billId ? { ...bill, amount: numericValue, rawAmountDisplay: sanitized } : bill
       )
     );
   };
   
+  const handleBillAmountFocus = (billId: string) => {
+    setBills(prevBills =>
+      prevBills.map(bill => {
+        if (bill.id === billId) {
+          const currentAmount = bill.amount || 0;
+          // If amount is 0, show empty string for easier typing. Otherwise, show sanitized number.
+          let displayValue = sanitizeNumericInput(bill.rawAmountDisplay || '');
+          if (currentAmount === 0 && (displayValue === "0" || displayValue === "0,00" || displayValue === "0.00" || displayValue === formatCurrency(0))) {
+            displayValue = '';
+          } else if (bill.rawAmountDisplay && bill.rawAmountDisplay !== formatCurrency(currentAmount)) {
+             // if rawAmountDisplay is already a "raw" number, keep it.
+             // if it's formatted, sanitize it.
+             const alreadySanitized = bill.rawAmountDisplay.match(/^[0-9,.]*$/);
+             if(!alreadySanitized) {
+                displayValue = sanitizeNumericInput(bill.rawAmountDisplay);
+             } else {
+                displayValue = bill.rawAmountDisplay;
+             }
+          } else {
+            // Fallback to amount if rawAmountDisplay is not useful
+            displayValue = currentAmount === 0 ? '' : String(currentAmount).replace('.', getDecimalSeparator());
+            // Further ensure it's clean if converting from number
+            displayValue = sanitizeNumericInput(displayValue);
+          }
+
+          return { ...bill, rawAmountDisplay: displayValue };
+        }
+        return bill;
+      })
+    );
+  };
+
   const handleBillAmountBlur = (billId: string) => {
     setBills(prevBills => {
       return prevBills.map(bill => {
         if (bill.id === billId) {
-          // Ensure amount is a number, default to 0 if not properly parsed before
-          const currentAmount = typeof bill.amount === 'number' ? bill.amount : 0;
+          const currentAmount = bill.amount || 0;
           return { ...bill, amount: currentAmount, rawAmountDisplay: formatCurrency(currentAmount) };
         }
         return bill;
@@ -501,7 +510,8 @@ useEffect(() => {
   };
 
   const handleAddNewBillAmountBlur = () => {
-    // The raw value is parsed on submit
+    const parsed = parseCurrency(newBillAmountRaw);
+    setNewBillAmountRaw(formatCurrency(parsed));
   };
 
 
@@ -516,10 +526,12 @@ useEffect(() => {
         toast({ variant: "destructive", title: t('generic.error'), description: t('home.addBillModal.validation.amountMustBePositiveOrZero') });
         return;
     }
-    if (parsedAmount <= 0 && newBillAmountRaw.trim() !== '0' && newBillAmountRaw.trim() !== '' && newBillAmountRaw.trim() !== formatCurrency(0).replace(/\s/g, '')) {
+     // Allow 0 amount if explicitly typed as "0" or "0,00" etc.
+    if (parsedAmount <= 0 && newBillAmountRaw.trim() !== sanitizeNumericInput(formatCurrency(0)) && newBillAmountRaw.trim() !== "0" && newBillAmountRaw.trim() !== '') {
          toast({ variant: "destructive", title: t('generic.error'), description: t('home.addBillModal.validation.amountRequired') });
          return;
     }
+
 
     const newBillEntry: Bill = {
       id: newBillIsCustom || !newBillPredefinedId ? `custom-${Date.now()}` : newBillPredefinedId,
@@ -529,7 +541,7 @@ useEffect(() => {
       amount: parsedAmount,
       isCustom: newBillIsCustom || !newBillPredefinedId,
       incomeSourceId: selectedIncomeSourceForNewBill === "unassigned" ? undefined : selectedIncomeSourceForNewBill,
-      rawAmountDisplay: formatCurrency(parsedAmount), // Initialize with formatted amount
+      rawAmountDisplay: formatCurrency(parsedAmount), 
     };
 
     const billExists = bills.some(b => b.id === newBillEntry.id && !b.isCustom && !newBillEntry.isCustom);
@@ -568,7 +580,8 @@ useEffect(() => {
   };
   
   const handleIncomeSourceAmountBlur = () => {
-    // Parsed on save
+    const parsed = parseCurrency(incomeSourceAmountRaw);
+    setIncomeSourceAmountRaw(formatCurrency(parsed));
   };
 
   const handleSaveIncomeSource = () => {
@@ -852,13 +865,13 @@ useEffect(() => {
                   className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 border-b last:border-b-0 hover:bg-muted/50 transition-colors rounded-md"
                 >
                   {/* Icon and Name group */}
-                  <div className="flex items-center gap-3 mr-auto mb-2 sm:mb-0 sm:order-1">
+                  <div className="flex items-center gap-3 mr-auto mb-2 sm:mb-0">
                     <bill.icon className="h-7 w-7 text-accent flex-shrink-0"/>
                     <p className="font-medium truncate text-card-foreground flex-1">{bill.name}</p>
                   </div>
 
                   {/* Controls Group: Payer Select, Amount, Buttons */}
-                  <div className="flex flex-row flex-wrap items-center justify-end gap-2 w-full sm:w-auto mt-2 sm:mt-0 sm:order-2">
+                  <div className="flex flex-row flex-wrap items-center justify-end gap-2 w-full sm:w-auto mt-2 sm:mt-0">
                     {/* Income Source Select Div */}
                     <div className="min-w-[140px] flex-auto xs:flex-initial xs:w-auto sm:max-w-[170px] md:max-w-[190px]">
                       <Select
@@ -886,7 +899,8 @@ useEffect(() => {
                       <Input
                         id={`bill-amount-${bill.id}`}
                         type="text" 
-                        value={(bill.rawAmountDisplay !== undefined ? bill.rawAmountDisplay : formatCurrency(bill.amount))}
+                        value={bill.rawAmountDisplay ?? ''}
+                        onFocus={() => handleBillAmountFocus(bill.id)}
                         onChange={(e) => handleBillAmountRawChange(bill.id, e.target.value)}
                         onBlur={() => handleBillAmountBlur(bill.id)}
                         placeholder={t('home.addBillModal.amountPlaceholder')}
