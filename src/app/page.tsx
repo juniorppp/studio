@@ -28,6 +28,8 @@ import { enUS, ptBR } from 'date-fns/locale';
 import { getMonthlyData, saveMonthlyData } from '@/actions/financial-data';
 
 const LOCAL_SETTINGS_KEY = 'billBlissSettings'; // For user preferences like locale, default income
+const DEFAULT_LOCALE: Locale = 'en';
+
 
 const PREDEFINED_BILLS_CONFIG: BillConfig[] = [
   { id: 'water', nameKey: 'home.bills.water', defaultName: 'Water Bill', icon: Droplet },
@@ -77,7 +79,7 @@ export default function HomePage() {
 
   const [isClient, setIsClient] = useState(false);
   // User settings from localStorage
-  const [userSettings, setUserSettings] = useState<Omit<AppStorage, 'allMonthlyData'>>({ userLocale: getLocale(), defaultIncome: 0, defaultIncomeSourceName: '' });
+  const [userSettings, setUserSettings] = useState<Omit<AppStorage, 'allMonthlyData'>>({ userLocale: DEFAULT_LOCALE, defaultIncome: 0, defaultIncomeSourceName: '' });
 
 
   const [selectedYear, setSelectedYear] = useState<number>(getYear(new Date()));
@@ -118,26 +120,21 @@ export default function HomePage() {
 
   const sanitizeNumericInput = useCallback((value: string) => {
     const decimalSeparator = getDecimalSeparator();
-    if (value === decimalSeparator) return value; // Allow typing just the separator
+    if (value === decimalSeparator) return value; 
 
-    // Remove anything not a digit or the allowed decimal separator
     const regex = new RegExp(`[^0-9${decimalSeparator === '.' ? '\\.' : decimalSeparator}]`, 'g');
     let sanitized = value.replace(regex, '');
   
-    // Ensure only one decimal separator
     const parts = sanitized.split(decimalSeparator);
     if (parts.length > 2) {
       sanitized = parts[0] + decimalSeparator + parts.slice(1).join('');
     }
-    // Prevent leading multiple zeros unless it's "0" or "0," or "0."
      if (sanitized.length > 1 && sanitized.startsWith('0') && sanitized[1] !== decimalSeparator) {
         sanitized = sanitized.substring(1);
-        // Handle cases like "00" -> "0" or "00.1" -> "0.1"
         while (sanitized.length > 1 && sanitized.startsWith('0') && sanitized[1] !== decimalSeparator) {
             sanitized = sanitized.substring(1);
         }
     }
-    // if it's just "00" or "000", make it "0"
     if (/^0+$/.test(sanitized) && sanitized.length > 1) {
         sanitized = "0";
     }
@@ -352,7 +349,7 @@ useEffect(() => {
 
   const handleBillAmountRawChange = (billId: string, rawValue: string) => {
     const sanitized = sanitizeNumericInput(rawValue);
-    const numericValue = parseCurrency(sanitized); // Use parseCurrency to correctly interpret locale-specific numbers
+    const numericValue = parseCurrency(sanitized); 
 
     setBills(prevBills =>
       prevBills.map(bill =>
@@ -366,25 +363,19 @@ useEffect(() => {
       prevBills.map(bill => {
         if (bill.id === billId) {
           const currentAmount = bill.amount || 0;
-          // If amount is 0, show empty string for easier typing. Otherwise, show sanitized number.
-          let displayValue = sanitizeNumericInput(bill.rawAmountDisplay || '');
-          if (currentAmount === 0 && (displayValue === "0" || displayValue === "0,00" || displayValue === "0.00" || displayValue === formatCurrency(0))) {
-            displayValue = '';
-          } else if (bill.rawAmountDisplay && bill.rawAmountDisplay !== formatCurrency(currentAmount)) {
-             // if rawAmountDisplay is already a "raw" number, keep it.
-             // if it's formatted, sanitize it.
-             const alreadySanitized = bill.rawAmountDisplay.match(/^[0-9,.]*$/);
-             if(!alreadySanitized) {
-                displayValue = sanitizeNumericInput(bill.rawAmountDisplay);
-             } else {
-                displayValue = bill.rawAmountDisplay;
-             }
+          let displayValue = bill.rawAmountDisplay || '';
+
+          if (currentAmount === 0 && (displayValue === formatCurrency(0) || displayValue === "0" || displayValue === "")) {
+            displayValue = ''; // Show empty for zero for easier typing
           } else {
-            // Fallback to amount if rawAmountDisplay is not useful
-            displayValue = currentAmount === 0 ? '' : String(currentAmount).replace('.', getDecimalSeparator());
-            // Further ensure it's clean if converting from number
-            displayValue = sanitizeNumericInput(displayValue);
+            // Convert fully formatted string to simpler number string for editing
+             displayValue = sanitizeNumericInput(String(currentAmount).replace('.', getDecimalSeparator()));
           }
+          // If rawAmountDisplay was already a simple number, it might be fine. This ensures it is simplified.
+          if (bill.rawAmountDisplay && bill.rawAmountDisplay.match(/^[0-9,.]*$/) && parseCurrency(bill.rawAmountDisplay) === currentAmount) {
+              displayValue = bill.rawAmountDisplay; // Keep it if it's already a "raw" valid number
+          }
+
 
           return { ...bill, rawAmountDisplay: displayValue };
         }
@@ -526,7 +517,6 @@ useEffect(() => {
         toast({ variant: "destructive", title: t('generic.error'), description: t('home.addBillModal.validation.amountMustBePositiveOrZero') });
         return;
     }
-     // Allow 0 amount if explicitly typed as "0" or "0,00" etc.
     if (parsedAmount <= 0 && newBillAmountRaw.trim() !== sanitizeNumericInput(formatCurrency(0)) && newBillAmountRaw.trim() !== "0" && newBillAmountRaw.trim() !== '') {
          toast({ variant: "destructive", title: t('generic.error'), description: t('home.addBillModal.validation.amountRequired') });
          return;
@@ -556,10 +546,26 @@ useEffect(() => {
   };
 
   const handleDeleteBill = (billIdToDelete: string) => {
+    console.log('[DEBUG] Attempting to delete bill with ID:', billIdToDelete);
     const billToDelete = bills.find(b => b.id === billIdToDelete);
-    if (!billToDelete) return; 
 
-    setBills(prevBills => prevBills.filter(bill => bill.id !== billIdToDelete));
+    if (!billToDelete) {
+      console.error(`[DEBUG] Bill with ID '${billIdToDelete}' not found for deletion. Current bills:`, bills.map(b => b.id));
+      toast({ variant: "destructive", title: t('generic.error'), description: `Bill not found for deletion. ID: ${billIdToDelete}`});
+      return;
+    }
+    console.log('[DEBUG] Bill found for deletion:', billToDelete);
+
+    setBills(prevBills => {
+      console.log('[DEBUG] Previous bills count:', prevBills.length, 'IDs:', prevBills.map(b => b.id));
+      const newBills = prevBills.filter(bill => bill.id !== billIdToDelete);
+      console.log('[DEBUG] New bills count after filter:', newBills.length, 'IDs:', newBills.map(b => b.id));
+      if (prevBills.length === newBills.length && prevBills.length > 0) {
+          console.warn(`[DEBUG] Filter with ID '${billIdToDelete}' did not remove any bills. Please check ID matching carefully (type, case, whitespace).`);
+      }
+      return newBills;
+    });
+
     toast({ title: t('home.deleteBillModal.toast.success.title'), description: t('home.deleteBillModal.toast.success.description', { billName: billToDelete.name }) });
   };
 
