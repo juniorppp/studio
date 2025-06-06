@@ -1068,11 +1068,11 @@ useEffect(() => {
                         cx="50%"
                         cy="50%"
                         outerRadius={80}
-                        innerRadius={50} // This makes it a Donut chart
+                        // innerRadius={50} // Removed to make it a PieChart instead of Donut
                         labelLine={false}
                         label={({ cx, cy, midAngle, innerRadius, outerRadius, percent, index }) => {
                           const RADIAN = Math.PI / 180;
-                          const radius = innerRadius + (outerRadius - innerRadius) * 0.7; // Adjust label position
+                          const radius = outerRadius * 0.7; // Adjust label position for PieChart
                           const x = cx + radius * Math.cos(-midAngle * RADIAN);
                           const y = cy + radius * Math.sin(-midAngle * RADIAN);
                           return (
@@ -1100,32 +1100,48 @@ useEffect(() => {
           <Card className="shadow-lg hover:shadow-xl transition-shadow duration-300">
             <CardHeader>
               <CardTitle className="flex items-center text-2xl font-headline">
-                <BarChart3 className="mr-2 h-7 w-7 text-primary" /> 
+                <PieChartIcon className="mr-2 h-7 w-7 text-primary" /> 
                 {t('home.incomeContributionChart.title')}
               </CardTitle>
               <CardDescription>{t('home.incomeContributionChart.descriptionPeriod', { month: monthOptions.find(m=>m.value === (selectedMonth !== null ? selectedMonth.toString() : ''))?.label || '', year: selectedYear !== null ? selectedYear.toString() : '' })}</CardDescription>
             </CardHeader>
             <CardContent>
               {incomeContributionChartData.length > 0 ? (
-                 <ChartContainer config={incomeContributionChartConfig} className="mx-auto h-[300px] w-full">
+                 <ChartContainer config={incomeContributionChartConfig} className="mx-auto aspect-square h-[300px] w-full">
                     <ResponsiveContainer width="100%" height="100%">
-                        <BarChart 
-                            layout="vertical" 
-                            data={incomeContributionChartData}
-                            margin={{ top: 5, right: 30, left: 5, bottom: 5 }}
-                            barCategoryGap="20%"
-                        >
-                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))"/>
-                            <XAxis type="number" stroke="hsl(var(--foreground))" fontSize={12} tickFormatter={(value) => `${formatCurrency(value).replace(/\D00$/, '')}`} />
-                            <YAxis dataKey="name" type="category" stroke="hsl(var(--foreground))" fontSize={12} width={80} tick={{ dy: 5 }} />
-                            <ChartTooltip cursor={{ fill: 'hsl(var(--muted))' }} content={<ChartTooltipContent />} />
-                            <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={Math.min(25, 180 / incomeContributionChartData.length) || 15}>
+                         <PieChart>
+                            <ChartTooltip 
+                                cursor={{ fill: 'hsl(var(--muted))' }} 
+                                content={<ChartTooltipContent hideLabel nameKey="name" />} 
+                            />
+                            <Pie
+                                data={incomeContributionChartData}
+                                dataKey="value"
+                                nameKey="name"
+                                cx="50%"
+                                cy="50%"
+                                outerRadius={80}
+                                // innerRadius={50} // This makes it a Donut chart
+                                labelLine={false}
+                                label={({ cx, cy, midAngle, innerRadius, outerRadius, percent, index }) => {
+                                const RADIAN = Math.PI / 180;
+                                const radius = outerRadius * 0.7; 
+                                const x = cx + radius * Math.cos(-midAngle * RADIAN);
+                                const y = cy + radius * Math.sin(-midAngle * RADIAN);
+                                return (
+                                    (percent * 100) > 5 ? 
+                                    <text x={x} y={y} fill="hsl(var(--foreground))" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central" fontSize="10px">
+                                        {`${incomeContributionChartData[index].name.substring(0,10)}${incomeContributionChartData[index].name.length > 10 ? '...' : ''} (${(percent * 100).toFixed(0)}%)`}
+                                    </text> : null
+                                );
+                                }}
+                            >
                                 {incomeContributionChartData.map((entry, index) => (
                                 <Cell key={`cell-income-contrib-${index}`} fill={entry.fill} />
                                 ))}
-                            </Bar>
+                            </Pie>
                             <ChartLegend content={<ChartLegendContent nameKey="name" />} />
-                        </BarChart>
+                        </PieChart>
                     </ResponsiveContainer>
                 </ChartContainer>
               ) : (
@@ -1308,5 +1324,7 @@ useEffect(() => {
   );
 }
 
+
+    
 
     
