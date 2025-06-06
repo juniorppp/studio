@@ -1047,48 +1047,48 @@ useEffect(() => {
           <Card className="shadow-lg hover:shadow-xl transition-shadow duration-300">
             <CardHeader>
               <CardTitle className="flex items-center text-2xl font-headline">
-                <BarChart3 className="mr-2 h-7 w-7 text-primary" />
+                <PieChartIcon className="mr-2 h-7 w-7 text-primary" /> 
                 {t('home.chartCard.title')}
               </CardTitle>
               <CardDescription>{t('home.chartCard.descriptionPeriod', { month: monthOptions.find(m=>m.value === (selectedMonth !== null ? selectedMonth.toString() : ''))?.label || '', year: selectedYear !== null ? selectedYear.toString() : '' })}</CardDescription>
             </CardHeader>
             <CardContent>
               {expenseChartData.length > 0 ? (
-                <ChartContainer config={expenseChartConfig} className="mx-auto h-[350px] sm:h-[400px] w-full">
+                <ChartContainer config={expenseChartConfig} className="mx-auto aspect-square h-[250px] sm:h-[300px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={expenseChartData}
-                      margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                      <XAxis 
-                        dataKey="name" 
-                        type="category" 
-                        stroke="hsl(var(--foreground))" 
-                        fontSize={12} 
-                        tickLine={false} 
-                        axisLine={true}
-                        interval={0}
-                        angle={-30}
-                        textAnchor="end"
-                        height={60} // Adjust height to accommodate slanted labels
+                    <PieChart>
+                      <ChartTooltip 
+                        cursor={{ fill: 'hsl(var(--muted))' }} 
+                        content={<ChartTooltipContent hideLabel nameKey="name" />} 
                       />
-                      <YAxis 
-                        type="number" 
-                        stroke="hsl(var(--foreground))" 
-                        fontSize={12} 
-                        tickLine={false} 
-                        axisLine={true}
-                        tickFormatter={(value) => `${formatCurrency(value).replace(/\D00$/, '')}`}
-                      />
-                      <ChartTooltip cursor={{ fill: 'hsl(var(--muted))' }} content={<ChartTooltipContent />} />
-                      <Bar dataKey="value" radius={[4, 4, 0, 0]} barSize={Math.min(30, 200 / expenseChartData.length) || 15}>
+                      <Pie
+                        data={expenseChartData}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={80}
+                        innerRadius={50} // This makes it a Donut chart
+                        labelLine={false}
+                        label={({ cx, cy, midAngle, innerRadius, outerRadius, percent, index }) => {
+                          const RADIAN = Math.PI / 180;
+                          const radius = innerRadius + (outerRadius - innerRadius) * 0.7; // Adjust label position
+                          const x = cx + radius * Math.cos(-midAngle * RADIAN);
+                          const y = cy + radius * Math.sin(-midAngle * RADIAN);
+                          return (
+                            (percent * 100) > 5 ? // Only show label if percent > 5%
+                            <text x={x} y={y} fill="hsl(var(--foreground))" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central" fontSize="10px">
+                              {`${expenseChartData[index].name.substring(0,10)}${expenseChartData[index].name.length > 10 ? '...' : ''} (${(percent * 100).toFixed(0)}%)`}
+                            </text> : null
+                          );
+                        }}
+                      >
                         {expenseChartData.map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={entry.fill} />
                         ))}
-                      </Bar>
+                      </Pie>
                       <ChartLegend content={<ChartLegendContent nameKey="name" />} />
-                    </BarChart>
+                    </PieChart>
                   </ResponsiveContainer>
                 </ChartContainer>
               ) : (
@@ -1100,35 +1100,32 @@ useEffect(() => {
           <Card className="shadow-lg hover:shadow-xl transition-shadow duration-300">
             <CardHeader>
               <CardTitle className="flex items-center text-2xl font-headline">
-                <PieChartIcon className="mr-2 h-7 w-7 text-primary" />
+                <BarChart3 className="mr-2 h-7 w-7 text-primary" /> 
                 {t('home.incomeContributionChart.title')}
               </CardTitle>
               <CardDescription>{t('home.incomeContributionChart.descriptionPeriod', { month: monthOptions.find(m=>m.value === (selectedMonth !== null ? selectedMonth.toString() : ''))?.label || '', year: selectedYear !== null ? selectedYear.toString() : '' })}</CardDescription>
             </CardHeader>
             <CardContent>
               {incomeContributionChartData.length > 0 ? (
-                 <ChartContainer config={incomeContributionChartConfig} className="mx-auto aspect-square h-[250px] sm:h-[300px] w-full">
+                 <ChartContainer config={incomeContributionChartConfig} className="mx-auto h-[300px] w-full">
                     <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                            <ChartTooltip content={<ChartTooltipContent hideLabel nameKey="name" />} />
-                            <Pie data={incomeContributionChartData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} labelLine={false} label={({ cx, cy, midAngle, innerRadius, outerRadius, percent, index }) => {
-                                const RADIAN = Math.PI / 180;
-                                const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
-                                const x = cx + radius * Math.cos(-midAngle * RADIAN);
-                                const y = cy + radius * Math.sin(-midAngle * RADIAN);
-                                return (
-                                    <text x={x} y={y} fill="white" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central" fontSize="10px">
-                                    {`${(percent * 100).toFixed(0)}%`}
-                                    </text>
-                                );
-                                }}
-                            >
+                        <BarChart 
+                            layout="vertical" 
+                            data={incomeContributionChartData}
+                            margin={{ top: 5, right: 30, left: 5, bottom: 5 }}
+                            barCategoryGap="20%"
+                        >
+                            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))"/>
+                            <XAxis type="number" stroke="hsl(var(--foreground))" fontSize={12} tickFormatter={(value) => `${formatCurrency(value).replace(/\D00$/, '')}`} />
+                            <YAxis dataKey="name" type="category" stroke="hsl(var(--foreground))" fontSize={12} width={80} tick={{ dy: 5 }} />
+                            <ChartTooltip cursor={{ fill: 'hsl(var(--muted))' }} content={<ChartTooltipContent />} />
+                            <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={Math.min(25, 180 / incomeContributionChartData.length) || 15}>
                                 {incomeContributionChartData.map((entry, index) => (
                                 <Cell key={`cell-income-contrib-${index}`} fill={entry.fill} />
                                 ))}
-                            </Pie>
+                            </Bar>
                             <ChartLegend content={<ChartLegendContent nameKey="name" />} />
-                        </PieChart>
+                        </BarChart>
                     </ResponsiveContainer>
                 </ChartContainer>
               ) : (
@@ -1311,3 +1308,5 @@ useEffect(() => {
   );
 }
 
+
+    
