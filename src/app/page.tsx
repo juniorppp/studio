@@ -1067,19 +1067,28 @@ useEffect(() => {
                         nameKey="name"
                         cx="50%"
                         cy="50%"
-                        outerRadius={80}
-                        // innerRadius={50} // Removed to make it a PieChart instead of Donut
+                        outerRadius={90} 
                         labelLine={false}
-                        label={({ cx, cy, midAngle, innerRadius, outerRadius, percent, index }) => {
+                        label={({ cx, cy, midAngle, outerRadius, percent }) => {
                           const RADIAN = Math.PI / 180;
-                          const radius = outerRadius * 0.7; // Adjust label position for PieChart
+                          const radius = outerRadius * 0.6; 
                           const x = cx + radius * Math.cos(-midAngle * RADIAN);
                           const y = cy + radius * Math.sin(-midAngle * RADIAN);
+                          if ((percent * 100) < 5) {
+                            return null;
+                          }
                           return (
-                            (percent * 100) > 5 ? // Only show label if percent > 5%
-                            <text x={x} y={y} fill="hsl(var(--foreground))" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central" fontSize="10px">
-                              {`${expenseChartData[index].name.substring(0,10)}${expenseChartData[index].name.length > 10 ? '...' : ''} (${(percent * 100).toFixed(0)}%)`}
-                            </text> : null
+                            <text
+                              x={x}
+                              y={y}
+                              fill="hsl(var(--background))"
+                              textAnchor="middle"
+                              dominantBaseline="central"
+                              fontSize="10px"
+                              fontWeight="bold"
+                            >
+                              {`${(percent * 100).toFixed(0)}%`}
+                            </text>
                           );
                         }}
                       >
@@ -1121,7 +1130,6 @@ useEffect(() => {
                                 cx="50%"
                                 cy="50%"
                                 outerRadius={80}
-                                // innerRadius={50} // This makes it a Donut chart
                                 labelLine={false}
                                 label={({ cx, cy, midAngle, innerRadius, outerRadius, percent, index }) => {
                                 const RADIAN = Math.PI / 180;
@@ -1324,6 +1332,8 @@ useEffect(() => {
   );
 }
 
+
+    
 
     
 
