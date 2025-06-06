@@ -16,7 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { BarChart3, Droplet, Zap, Wifi, Home, DollarSign, LineChart, AlertCircle, Loader2, Brain, Receipt, PlusCircle, CalendarDays, Edit3, Trash2, Landmark, ArrowRightCircle, PieChartIcon } from 'lucide-react';
-import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, XAxis, YAxis } from 'recharts';
+import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, XAxis, YAxis } from 'recharts';
 import { ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from "@/components/ui/chart";
 import type { Bill, BillConfig, StoredBillData, MonthlyData, Locale, IncomeSource, UserJWTPayload, UserSettings } from '@/types';
 import { getSpendingInsights } from '@/ai/flows/spending-insights';
@@ -1059,19 +1059,20 @@ useEffect(() => {
                     <BarChart
                       data={expenseChartData}
                       layout="vertical"
-                      margin={{ top: 5, right: 30, left: 5, bottom: 5 }} // Reduced left margin
+                      margin={{ top: 5, right: 30, left: 5, bottom: 5 }}
+                      barCategoryGap="10%" 
                     >
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                       <XAxis type="number" stroke="hsl(var(--foreground))" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `${formatCurrency(value).replace(/\D00$/, '')}`} />
                       <YAxis 
                         dataKey="name" 
                         type="category" 
-                        tick={false} // Hide Y-axis labels
-                        axisLine={false} // Hide Y-axis line
+                        tick={false} 
+                        axisLine={false} 
                         tickLine={false}
-                        // width={0} // Minimize width as labels are hidden
                       />
                       <ChartTooltip cursor={{ fill: 'hsl(var(--muted))' }} content={<ChartTooltipContent />} />
-                      <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={Math.min(30, 200 / expenseChartData.length) || 15}>
+                      <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={Math.min(20, 150 / expenseChartData.length) || 10}>
                         {expenseChartData.map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={entry.fill} />
                         ))}
@@ -1299,3 +1300,4 @@ useEffect(() => {
     </div>
   );
 }
+
