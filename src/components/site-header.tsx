@@ -10,39 +10,39 @@ import { useLocalization } from '@/hooks/use-localization';
 import { getUserSession, logoutUser } from '@/actions/auth';
 import { useEffect, useState } from 'react';
 import type { UserJWTPayload } from '@/types';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation'; // Import usePathname
 
 export function SiteHeader() {
   const { t } = useLocalization();
   const router = useRouter();
+  const pathname = usePathname(); // Get current pathname
   const [session, setSession] = useState<UserJWTPayload | null>(null);
   const [isLoadingSession, setIsLoadingSession] = useState(true);
 
   useEffect(() => {
     const fetchSession = async () => {
       setIsLoadingSession(true);
-      // console.log('[SiteHeader] Attempting to fetch session...');
+      console.log('[SiteHeader] Attempting to fetch session on path:', pathname);
       try {
         const currentSession = await getUserSession();
-        // console.log('[SiteHeader] Fetched session result:', currentSession);
+        console.log('[SiteHeader] Fetched session result:', currentSession);
         setSession(currentSession);
       } catch (error) {
-        // console.error("[SiteHeader] Failed to fetch session in useEffect:", error);
+        console.error("[SiteHeader] Failed to fetch session in useEffect:", error);
         setSession(null);
       } finally {
         setIsLoadingSession(false);
       }
     };
     fetchSession();
-  }, []);
+  }, [pathname]); // Add pathname to dependency array
 
   const handleLogout = async () => {
-    // console.log('[SiteHeader] Logging out...');
-    await logoutUser();
-    setSession(null); 
-    // router.push('/login'); // logoutUser action already redirects
-    router.refresh(); 
-    // console.log('[SiteHeader] Logout complete, session set to null, router refreshed.');
+    console.log('[SiteHeader] Logging out...');
+    await logoutUser(); // This action performs a server-side redirect
+    setSession(null); // Optimistic client-side update
+    // router.refresh(); // Removed, as redirect + pathname change in useEffect should handle re-fetch
+    console.log('[SiteHeader] Logout action called, optimistic session set to null.');
   };
 
   return (
@@ -83,7 +83,7 @@ export function SiteHeader() {
             <Button variant="ghost" size="sm" disabled>...</Button>
           ) : session ? (
             <>
-              <span className="text-sm text-muted-foreground"> {/* Temporarily removed 'hidden sm:inline' for debugging */}
+              <span className="text-sm text-muted-foreground">
                 {t('nav.welcomeUser', { username: session.username })}
               </span>
               <Button variant="outline" size="sm" onClick={handleLogout}>
@@ -112,5 +112,3 @@ export function SiteHeader() {
     </header>
   );
 }
-
-    
