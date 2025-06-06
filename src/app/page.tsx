@@ -27,7 +27,7 @@ import { format, getYear, getMonth, addMonths } from 'date-fns';
 import { enUS, ptBR } from 'date-fns/locale';
 import { getMonthlyData, saveMonthlyData } from '@/actions/financial-data';
 
-
+const DEFAULT_LOCALE: Locale = 'en';
 const LOCAL_SETTINGS_KEY = 'billBlissSettings'; // For user preferences like locale, default income
 
 const PREDEFINED_BILLS_CONFIG: BillConfig[] = [
@@ -71,7 +71,6 @@ const generateYearOptions = () => {
   return years;
 };
 
-const DEFAULT_LOCALE: Locale = 'en';
 
 export default function HomePage() {
   const { t, formatCurrency, parseCurrency, getLocale, locale } = useLocalization();
@@ -208,11 +207,9 @@ useEffect(() => {
         let finalMonthData: MonthlyData;
 
         if (existingMonthData) {
-          // Ensure incomeSources and bills are arrays
           const resolvedIncomeSources = Array.isArray(existingMonthData.incomeSources) ? existingMonthData.incomeSources : [];
           const resolvedStoredBills = Array.isArray(existingMonthData.bills) ? existingMonthData.bills : [];
           
-          // Ensure primary income source logic
           const primaryIncomeNameFromSettings = userSettings.defaultIncomeSourceName?.trim()
             ? userSettings.defaultIncomeSourceName
             : t('home.incomeSources.defaultPrimaryName');
@@ -235,9 +232,9 @@ useEffect(() => {
             }
           }
           
-          // Ensure uniqueness after potential modifications
           const uniqueIncomeSources = Array.from(new Map(resolvedIncomeSources.map(item => [item.id, item])).values());
-          const uniqueStoredBills = Array.from(new Map((existingMonthData.bills || []).map(item => [item.id, item])).values());
+          const uniqueStoredBills = Array.from(new Map(resolvedStoredBills.map(item => [item.id, item])).values());
+
 
           finalMonthData = {
             ...existingMonthData,
@@ -246,7 +243,6 @@ useEffect(() => {
           };
 
         } else {
-          // No data in DB, initialize new month data
           const primaryIncomeName = userSettings.defaultIncomeSourceName?.trim()
             ? userSettings.defaultIncomeSourceName
             : t('home.incomeSources.defaultPrimaryName');
@@ -261,23 +257,21 @@ useEffect(() => {
             year: selectedYear,
             month: selectedMonth,
             incomeSources: initialIncomeSources,
-            bills: [], // Bills start empty for a new month
+            bills: [], 
           };
-          // Save this newly initialized data to DB
           const saved = await saveMonthlyData(finalMonthData);
-          finalMonthData = saved; // Use the returned data with _id
+          finalMonthData = saved; 
         }
         
         setCurrentMonthlyData(finalMonthData);
-        setIncomeSources(finalMonthData.incomeSources);
-        setBills(mapStoredDataToBills(finalMonthData.bills));
+        setIncomeSources(finalMonthData.incomeSources || []);
+        setBills(mapStoredDataToBills(finalMonthData.bills || []));
         setInsights(null);
         setErrorInsights(null);
 
       } catch (error) {
         console.error("Error in data loading/initialization:", error);
         toast({ variant: "destructive", title: t('toast.errorLoadingData.title'), description: (error as Error).message });
-        // Fallback to a local empty structure if DB interaction fails critically
          const primaryIncomeName = userSettings.defaultIncomeSourceName?.trim()
             ? userSettings.defaultIncomeSourceName
             : t('home.incomeSources.defaultPrimaryName');
@@ -306,32 +300,28 @@ useEffect(() => {
     dataSaveTimeoutRef.current = setTimeout(async () => {
       if (currentMonthlyData) {
         try {
-          // Ensure currentMonthlyData reflects the latest UI state
           const dataToSave: MonthlyData = {
             ...currentMonthlyData,
-            incomeSources: incomeSources, // from UI state
-            bills: billsToStoredBillsArray(bills), // from UI state
+            incomeSources: incomeSources, 
+            bills: billsToStoredBillsArray(bills), 
           };
           const saved = await saveMonthlyData(dataToSave);
-          setCurrentMonthlyData(saved); // Update with potentially new _id or other DB-side changes
-          // toast({ title: "Data Synced", description: "Your changes have been saved to the database."});
+          setCurrentMonthlyData(saved); 
         } catch (error) {
           console.error("Failed to save data to DB:", error);
           toast({ variant: "destructive", title: t('toast.errorSavingData.title'), description: (error as Error).message });
         }
       }
-    }, 1500); // Debounce for 1.5 seconds
+    }, 1500); 
   }, [currentMonthlyData, incomeSources, bills, toast, t]);
 
-  // Trigger debounced save when incomeSources or bills UI state changes
   useEffect(() => {
-    if (!isLoadingMonthlyData && isClient && currentMonthlyData) { // Only save if initial load is done
+    if (!isLoadingMonthlyData && isClient && currentMonthlyData) { 
       scheduleSaveToDb();
     }
   }, [incomeSources, bills, isLoadingMonthlyData, isClient, currentMonthlyData, scheduleSaveToDb]);
 
 
-   // Effect to update bill names if language changes
    useEffect(() => {
     if (isClient && bills.length > 0) {
         setBills(currentBills => currentBills.map(bill => ({
@@ -360,7 +350,7 @@ useEffect(() => {
       
       const updatedBills = prevBills.map(bill => {
         if (bill.id === billId) {
-          const { rawAmountDisplay, ...rest } = bill; // Remove rawAmountDisplay after parsing
+          const { rawAmountDisplay, ...rest } = bill; 
           return { ...rest, amount: numericValue };
         }
         return bill;
@@ -412,7 +402,7 @@ useEffect(() => {
     const insightInput: SpendingInsightsInput = {
       incomeSources: currentMonthlyData.incomeSources.map(s => ({name: s.name, amount: s.amount })),
       totalIncome: totalIncomeForAI, 
-      expenses: currentMonthlyData.bills.map(b_stored => { 
+      expenses: (currentMonthlyData.bills || []).map(b_stored => { 
           const uiBill = bills.find(ui_b => ui_b.id === b_stored.id);
           const name = uiBill ? uiBill.name : (b_stored.isCustom ? b_stored.name : PREDEFINED_BILLS_CONFIG.find(pbc => pbc.id === b_stored.id)?.defaultName || t('home.bills.customBillFallback'));
           const paidBySource = currentMonthlyData.incomeSources.find(src => src.id === b_stored.incomeSourceId);
@@ -457,7 +447,7 @@ useEffect(() => {
     setNewBillIcon(config.icon);
     setNewBillIsCustom(false); 
     setNewBillPredefinedId(config.id);
-    setNewBillAmountRaw(''); // Clear amount for user to input
+    setNewBillAmountRaw(''); 
   };
   
   const handleNewBillNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -474,10 +464,7 @@ useEffect(() => {
   };
 
   const handleAddNewBillAmountBlur = () => {
-    // The raw value is parsed on submit, display formatting isn't strictly needed here as it's a modal
-    // but if desired, could format it:
-    // const parsed = parseCurrency(newBillAmountRaw);
-    // setNewBillAmountRaw(parsed > 0 ? formatCurrency(parsed) : '');
+    // The raw value is parsed on submit
   };
 
 
@@ -826,14 +813,14 @@ useEffect(() => {
                   key={bill.id} 
                   className="flex flex-col sm:flex-row sm:items-center sm:gap-x-4 p-3 border-b last:border-b-0 hover:bg-muted/50 transition-colors rounded-md"
                 >
-                  {/* Icon and Name group (Mobile: full width; Desktop: auto) */}
-                  <div className="flex items-center gap-3 w-full sm:w-auto sm:flex-none mb-2 sm:mb-0">
+                  {/* Icon and Name group */}
+                  <div className="flex items-center gap-3 w-full sm:w-auto sm:flex-none sm:order-1 mb-2 sm:mb-0">
                     <bill.icon className="h-7 w-7 text-accent flex-shrink-0"/>
                     <p className="font-medium truncate text-card-foreground flex-1">{bill.name}</p>
                   </div>
 
-                  {/* Income Source Select (Mobile: full width below name; Desktop: middle, takes space) */}
-                  <div className="w-full sm:order-2 sm:flex-1 min-w-0 md:max-w-[220px] mb-2 sm:mb-0">
+                  {/* Income Source Select */}
+                  <div className="w-full sm:flex-1 sm:min-w-0 sm:max-w-[200px] sm:order-2 mb-2 sm:mb-0">
                     <Select
                       value={bill.incomeSourceId || "unassigned"}
                       onValueChange={(value) => handleBillIncomeSourceChange(bill.id, value)}
@@ -854,72 +841,71 @@ useEffect(() => {
                     </Select>
                   </div>
                   
-                  {/* Amount Input and Action Buttons group (Mobile: full width, side-by-side; Desktop: end, side-by-side) */}
-                  <div className="flex items-center justify-between w-full gap-2 sm:order-3 sm:w-auto sm:gap-1 sm:ml-auto">
-                    <div className="flex-grow sm:flex-grow-0 sm:w-28"> {/* Amount input */}
-                      <Input
-                        id={`bill-amount-${bill.id}`}
-                        type="text" 
-                        value={(bill as any).rawAmountDisplay ?? (bill.amount === 0 && !(bill as any).rawAmountDisplay?.trim() ? '' : formatCurrency(bill.amount))}
-                        onChange={(e) => handleBillAmountRawChange(bill.id, e.target.value)}
-                        onBlur={() => handleBillAmountBlur(bill.id)}
-                        placeholder={t('home.addBillModal.amountPlaceholder')}
-                        className="w-full text-right text-sm"
-                        aria-label={`${bill.name} ${t('home.addBillModal.amountLabel')}`}
-                      />
-                    </div>
+                  {/* Amount Input */}
+                  <div className="w-full sm:w-28 sm:order-3 mb-2 sm:mb-0 sm:ml-auto">
+                    <Input
+                      id={`bill-amount-${bill.id}`}
+                      type="text" 
+                      value={(bill as any).rawAmountDisplay ?? (bill.amount === 0 && !(bill as any).rawAmountDisplay?.trim() ? '' : formatCurrency(bill.amount))}
+                      onChange={(e) => handleBillAmountRawChange(bill.id, e.target.value)}
+                      onBlur={() => handleBillAmountBlur(bill.id)}
+                      placeholder={t('home.addBillModal.amountPlaceholder')}
+                      className="w-full text-right text-sm"
+                      aria-label={`${bill.name} ${t('home.addBillModal.amountLabel')}`}
+                    />
+                  </div>
 
-                    <div className="flex items-center gap-1"> {/* Action buttons */}
-                      <TooltipProvider delayDuration={100}>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleReplicateBill(bill)}
-                              aria-label={t('home.bills.tooltip.replicateBill')}
-                              className="h-9 w-9" 
-                            >
-                              <ArrowRightCircle className="h-5 w-5"/>
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent><p>{t('home.bills.tooltip.replicateBill')}</p></TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <TooltipProvider delayDuration={100}>
-                              <Tooltip>
-                                  <TooltipTrigger asChild>
-                                      <Button
-                                          variant="ghost"
-                                          size="icon"
-                                          className="text-destructive hover:text-destructive/90 hover:bg-destructive/10 h-9 w-9"
-                                          aria-label={t('home.bills.tooltip.deleteBill')}
-                                      >
-                                          <Trash2 className="h-5 w-5"/>
-                                      </Button>
-                                  </TooltipTrigger>
-                                  <TooltipContent><p>{t('home.bills.tooltip.deleteBill')}</p></TooltipContent>
-                              </Tooltip>
-                          </TooltipProvider>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>{t('home.deleteBillModal.title')}</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              {t('home.deleteBillModal.description', { billName: bill.name })}
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>{t('generic.cancel')}</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => handleDeleteBill(bill.id)} className="bg-destructive hover:bg-destructive/90">
-                              {t('generic.delete')}
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    </div>
+                  {/* Action Buttons */}
+                  <div className="flex items-center gap-1 w-full sm:w-auto sm:order-4 justify-start sm:justify-end">
+                    <TooltipProvider delayDuration={100}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleReplicateBill(bill)}
+                            aria-label={t('home.bills.tooltip.replicateBill')}
+                            className="h-9 w-9" 
+                          >
+                            <ArrowRightCircle className="h-5 w-5"/>
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent><p>{t('home.bills.tooltip.replicateBill')}</p></TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <TooltipProvider delayDuration={100}>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="text-destructive hover:text-destructive/90 hover:bg-destructive/10 h-9 w-9"
+                                        aria-label={t('home.bills.tooltip.deleteBill')}
+                                    >
+                                        <Trash2 className="h-5 w-5"/>
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent><p>{t('home.bills.tooltip.deleteBill')}</p></TooltipContent>
+                            </Tooltip>
+                        </TooltipProvider>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>{t('home.deleteBillModal.title')}</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            {t('home.deleteBillModal.description', { billName: bill.name })}
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>{t('generic.cancel')}</AlertDialogCancel>
+                          <AlertDialogAction onClick={() => handleDeleteBill(bill.id)} className="bg-destructive hover:bg-destructive/90">
+                            {t('generic.delete')}
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   </div>
                 </div>
               ))}
@@ -1007,7 +993,6 @@ useEffect(() => {
                         labelLine={false} 
                         label={({ percent, name }) => {
                             const percentage = (percent * 100).toFixed(0);
-                            // Only show label if percentage is significant enough to avoid clutter
                             return parseInt(percentage) > 3 ? `${name}: ${percentage}%` : `${percentage}%`; 
                         }}
                     >

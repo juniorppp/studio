@@ -17,10 +17,8 @@ if (!MONGODB_URI) {
   );
   console.error("***********************************************************************************");
   console.error(mongoInitializationError.message);
-  console.error("The value received for MONGODB_URI was:", MONGODB_URI);
-  console.error("Example .env.local content: ");
-  console.error("MONGODB_URI=\"mongodb://username:password@host:port/database?options\"");
-  console.error("MONGODB_DB_NAME=\"your_database_name\"");
+  console.error("Example .env.local content: MONGODB_URI=\"mongodb://username:password@host:port/database?options\"");
+  console.error("If using a local MongoDB instance without auth: MONGODB_URI=\"mongodb://localhost:27017/yourDatabaseName\"");
   console.error("***********************************************************************************");
 } else {
   // @ts-ignore
@@ -44,7 +42,7 @@ if (!MONGODB_URI) {
         mongoInitializationError = new Error('MongoDB client promise was not initialized in development without a specific error. This could be due to an invalid MONGODB_URI even if it is defined.');
         console.error(mongoInitializationError.message);
     }
-  } else {
+  } else { // Production
     try {
       client = new MongoClient(MONGODB_URI);
       clientPromise = client.connect();
@@ -84,7 +82,6 @@ export async function getMonthlyData(year: number, month: number): Promise<Month
     return null;
   } catch (error: any) {
     console.error('Error fetching monthly data:', error.message);
-    // Propagate the error so UI can handle it, or throw a more generic one
     throw new Error(`Failed to fetch monthly data: ${error.message}`);
   }
 }
@@ -97,6 +94,11 @@ export async function saveMonthlyData(data: Omit<MonthlyData, '_id'> & { _id?: s
     const { year, month, _id, ...updateData } = data;
 
     const filter = { year, month };
+
+    // For debugging potential duplicate issues
+    console.log('[DEBUG] saveMonthlyData: Filter for findOneAndUpdate:', JSON.stringify(filter));
+    // console.log('[DEBUG] saveMonthlyData: Data for $set:', JSON.stringify(updateData).substring(0, 300) + '...'); // Log partial data to avoid overly long logs
+
 
     const result = await db.collection(MONTHLY_DATA_COLLECTION).findOneAndUpdate(
       filter,
