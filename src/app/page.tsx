@@ -1054,25 +1054,35 @@ useEffect(() => {
             </CardHeader>
             <CardContent>
               {expenseChartData.length > 0 ? (
-                <ChartContainer config={expenseChartConfig} className="mx-auto h-[300px] sm:h-[350px] w-full">
+                <ChartContainer config={expenseChartConfig} className="mx-auto h-[350px] sm:h-[400px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
                       data={expenseChartData}
-                      layout="vertical"
-                      margin={{ top: 5, right: 30, left: 5, bottom: 5 }}
-                      barCategoryGap="10%" 
+                      margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                      <XAxis type="number" stroke="hsl(var(--foreground))" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `${formatCurrency(value).replace(/\D00$/, '')}`} />
-                      <YAxis 
+                      <XAxis 
                         dataKey="name" 
                         type="category" 
-                        tick={false} 
-                        axisLine={false} 
-                        tickLine={false}
+                        stroke="hsl(var(--foreground))" 
+                        fontSize={12} 
+                        tickLine={false} 
+                        axisLine={true}
+                        interval={0}
+                        angle={-30}
+                        textAnchor="end"
+                        height={60} // Adjust height to accommodate slanted labels
+                      />
+                      <YAxis 
+                        type="number" 
+                        stroke="hsl(var(--foreground))" 
+                        fontSize={12} 
+                        tickLine={false} 
+                        axisLine={true}
+                        tickFormatter={(value) => `${formatCurrency(value).replace(/\D00$/, '')}`}
                       />
                       <ChartTooltip cursor={{ fill: 'hsl(var(--muted))' }} content={<ChartTooltipContent />} />
-                      <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={Math.min(20, 150 / expenseChartData.length) || 10}>
+                      <Bar dataKey="value" radius={[4, 4, 0, 0]} barSize={Math.min(30, 200 / expenseChartData.length) || 15}>
                         {expenseChartData.map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={entry.fill} />
                         ))}
