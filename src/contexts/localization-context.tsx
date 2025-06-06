@@ -27,32 +27,47 @@ const translations: Record<Locale, Translations> = {
 const DEFAULT_LOCALE: Locale = 'en';
 const LOCAL_STORAGE_LANG_KEY = 'billBlissLanguage';
 
+// Função para tentar obter o locale inicial de forma síncrona
+const getInitialLocale = (): Locale => {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    const storedLang = localStorage.getItem(LOCAL_STORAGE_LANG_KEY) as Locale | null;
+    if (storedLang && (storedLang === 'en' || storedLang === 'pt')) {
+      return storedLang;
+    }
+  }
+  // Para renderização no servidor ou se não houver nada no localStorage, usa o padrão.
+  // O useEffect abaixo pode corrigir isso no cliente se necessário.
+  return DEFAULT_LOCALE;
+};
+
 export const LocalizationContext = createContext<LocalizationContextType | undefined>(undefined);
 
 export const LocalizationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [locale, setLocaleState] = useState<Locale>(DEFAULT_LOCALE);
-  const [isInitialized, setIsInitialized] = useState(false);
+  const [locale, setLocaleState] = useState<Locale>(getInitialLocale);
 
+  // Este useEffect atualiza o atributo lang do HTML e pode corrigir o locale
+  // se o valor síncrono inicial (para SSR) for diferente do localStorage do cliente.
   useEffect(() => {
-    const storedLang = localStorage.getItem(LOCAL_STORAGE_LANG_KEY) as Locale | null;
-    let initialLocale = DEFAULT_LOCALE;
-    if (storedLang && (storedLang === 'en' || storedLang === 'pt')) {
-      initialLocale = storedLang;
+    if (typeof document !== 'undefined') {
+      document.documentElement.lang = locale;
     }
-    
-    setLocaleState(initialLocale); // Update React state
-    if (typeof document !== 'undefined') { // Update HTML lang attribute
-      document.documentElement.lang = initialLocale;
+
+    // Se estamos no cliente, verificamos se o localStorage tem uma preferência diferente
+    // da que foi definida inicialmente (que poderia ser o DEFAULT_LOCALE do servidor).
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const storedLang = localStorage.getItem(LOCAL_STORAGE_LANG_KEY) as Locale | null;
+      if (storedLang && storedLang !== locale && (storedLang === 'en' || storedLang === 'pt')) {
+        setLocaleState(storedLang); // Isso vai disparar um novo render com o locale correto do cliente.
+      }
     }
-    setIsInitialized(true);
-  }, []); // Runs once on mount
+  }, [locale]); // Executa quando o locale muda.
 
   const setLocale = useCallback((newLocale: Locale) => {
     setLocaleState(newLocale);
-    localStorage.setItem(LOCAL_STORAGE_LANG_KEY, newLocale);
-    if (typeof document !== 'undefined') {
-        document.documentElement.lang = newLocale;
-      }
+    if (typeof window !== 'undefined' && window.localStorage) {
+      localStorage.setItem(LOCAL_STORAGE_LANG_KEY, newLocale);
+    }
+    // A atualização do document.documentElement.lang será tratada pelo useEffect acima.
   }, []);
   
   const getLocale = useCallback(() => locale, [locale]);
@@ -105,15 +120,9 @@ export const LocalizationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const value = useMemo(() => ({ locale, setLocale, t, formatCurrency, parseCurrency, getLocale }), 
     [locale, setLocale, t, formatCurrency, parseCurrency, getLocale]);
 
-  if (!isInitialized) {
-    return null; 
-  }
-
   return (
     <LocalizationContext.Provider value={value}>
       {children}
     </LocalizationContext.Provider>
   );
 };
-
-    
