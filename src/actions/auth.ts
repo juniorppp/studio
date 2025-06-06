@@ -68,7 +68,7 @@ export async function loginUser(username: string, plainPassword: string): Promis
 
     const userPayload: UserJWTPayload = { userId: user._id.toString(), username: user.username };
     const token = await generateUserToken(userPayload); // Now async
-    console.log(`[Login User] JWT generated for ${username}.`);
+    console.log(`[Login User] JWT generated for ${username}. Token length: ${token?.length}`);
 
     cookies().set(AUTH_COOKIE_NAME, token, {
       httpOnly: true,
@@ -87,16 +87,37 @@ export async function loginUser(username: string, plainPassword: string): Promis
 }
 
 export async function logoutUser(): Promise<void> {
+  console.log('[Logout User Action] Deleting auth cookie and redirecting.');
   cookies().delete(AUTH_COOKIE_NAME);
   redirect('/login');
 }
 
 export async function getUserSession(): Promise<UserJWTPayload | null> {
-  const token = cookies().get(AUTH_COOKIE_NAME)?.value;
-  if (!token) {
+  console.log('[getUserSession Action] Attempting to get session.');
+  const cookieStore = cookies();
+  const tokenCookie = cookieStore.get(AUTH_COOKIE_NAME);
+  
+  if (!tokenCookie || !tokenCookie.value) {
+    console.log('[getUserSession Action] No auth token cookie found or cookie has no value.');
     return null;
   }
-  return await verifyUserToken(token); // Now async
+  const token = tokenCookie.value;
+  console.log('[getUserSession Action] Auth token cookie found. Token length:', token.length);
+
+  try {
+    const payload = await verifyUserToken(token);
+    if (payload) {
+      console.log('[getUserSession Action] Token verified successfully, payload:', JSON.stringify(payload));
+    } else {
+      console.log('[getUserSession Action] Token verification returned null (verifyUserToken indicated invalid/expired token).');
+    }
+    return payload;
+  } catch (e: any) {
+    // This catch might be redundant if verifyUserToken handles its own errors and returns null,
+    // but kept for safety.
+    console.error('[getUserSession Action] Error during verifyUserToken call:', e.message);
+    return null;
+  }
 }
 
 export async function ensureAuthenticated(redirectTo = '/login'): Promise<UserJWTPayload> {

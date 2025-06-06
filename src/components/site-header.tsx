@@ -21,11 +21,13 @@ export function SiteHeader() {
   useEffect(() => {
     const fetchSession = async () => {
       setIsLoadingSession(true);
+      console.log('[SiteHeader] Attempting to fetch session...');
       try {
         const currentSession = await getUserSession();
+        console.log('[SiteHeader] Fetched session result:', currentSession);
         setSession(currentSession);
       } catch (error) {
-        console.error("Failed to fetch session:", error);
+        console.error("[SiteHeader] Failed to fetch session in useEffect:", error);
         setSession(null);
       } finally {
         setIsLoadingSession(false);
@@ -35,10 +37,12 @@ export function SiteHeader() {
   }, []);
 
   const handleLogout = async () => {
+    console.log('[SiteHeader] Logging out...');
     await logoutUser();
     setSession(null); // Update client-side state
     // router.push('/login'); // logoutUser action already redirects
     router.refresh(); // Ensure page reloads with new auth state
+    console.log('[SiteHeader] Logout complete, session set to null, router refreshed.');
   };
 
   return (
@@ -51,7 +55,10 @@ export function SiteHeader() {
           </span>
         </Link>
         <nav className="flex flex-1 items-center space-x-2">
-          {session && (
+          {isLoadingSession && (
+            <Button variant="ghost" size="sm" disabled className="text-xs">Loading nav...</Button>
+          )}
+          {!isLoadingSession && session && (
             <>
               <Link href="/" passHref>
                 <Button variant="ghost" className="text-sm font-medium">
@@ -67,6 +74,9 @@ export function SiteHeader() {
               </Link>
             </>
           )}
+           {!isLoadingSession && !session && (
+             <p className="text-xs text-muted-foreground hidden sm:block">Login to access features.</p>
+           )}
         </nav>
         <div className="flex items-center space-x-2">
           {isLoadingSession ? (
