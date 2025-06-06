@@ -1,48 +1,43 @@
-# Dockerfile
 
-# Stage 1: Build the Next.js application
-FROM node:20-alpine AS builder
+# ===== Builder Stage =====
+FROM node:18-alpine AS builder
 WORKDIR /app
 
-# Definir ARG para NODE_ENV para que seja usado durante npm install se necessário
-ARG NODE_ENV=development
-ENV NODE_ENV=${NODE_ENV}
+# Copiar package.json e package-lock.json (ou yarn.lock)
+COPY package*.json ./
 
-# Copiar package.json e package-lock.json (ou yarn.lock, pnpm-lock.yaml)
-COPY package.json package-lock.json* ./
-
-# Instalar dependências.
-# Para builds de produção, `npm ci` é geralmente preferido se package-lock.json está atualizado.
-# Se o build precisa de devDependencies (como o `next` para `next build`), instale todas.
+# Instalar dependências de produção primeiro se você tiver um lockfile robusto
+# RUN npm ci --only=production
+# Ou instalar todas as dependências se necessário para o build
 RUN npm install
 
-# Copiar o restante do código fonte da aplicação
+# Copiar o restante dos arquivos da aplicação
 COPY . .
 
-# Construir a aplicação Next.js
-# A opção `output: 'standalone'` no next.config.js garante
-# que um servidor mínimo seja construído no diretório .next/standalone
+# Rodar o script de build (Next.js irá detectar output: 'standalone')
 RUN npm run build
 
-# Stage 2: Production image (Runner)
-FROM node:20-alpine AS runner
+# ===== Runner Stage =====
+FROM node:18-alpine AS runner
 WORKDIR /app
 
-ENV NODE_ENV production
-# O servidor Next.js no modo standalone escuta na porta 3000 por padrão.
-# Você pode sobrescrever isso com a variável de ambiente PORT.
-# ENV PORT 3000
+# Definir explicitamente HOST e PORT para o servidor Next.js
+ENV HOST=0.0.0.0
+ENV PORT=3000
+ENV NODE_ENV=production
 
-# Copiar a saída standalone do estágio builder
-# Isso inclui server.js, .next/static, public, e node_modules mínimos
+# Copiar o diretório .next/standalone da build
 COPY --from=builder /app/.next/standalone ./
 
-# Expor a porta em que a aplicação roda
+# Copiar o diretório public para dentro do standalone (se houver assets estáticos)
+# O output standalone já inclui o public se ele existir na raiz do projeto.
+# Se você tiver o public e ele não estiver sendo incluído, pode adicionar:
+# COPY --from=builder /app/public ./public
+# No entanto, com output: 'standalone', o Next.js deve lidar com isso,
+# e a cópia de .next/standalone já contém a pasta public (se ela existir na raiz).
+
+# Expor a porta que o app Next.js irá rodar (padrão 3000)
 EXPOSE 3000
 
-# Opcional: Desabilitar telemetria do Next.js
-ENV NEXT_TELEMETRY_DISABLED 1
-
-# Comando para rodar a aplicação
-# O arquivo server.js é criado pela saída standalone
+# Comando para iniciar a aplicação (o server.js é gerado pelo build standalone)
 CMD ["node", "server.js"]
