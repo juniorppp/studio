@@ -27,7 +27,6 @@ import { format, getYear, getMonth, addMonths } from 'date-fns';
 import { enUS, ptBR } from 'date-fns/locale';
 import { getMonthlyData, saveMonthlyData } from '@/actions/financial-data';
 
-const DEFAULT_LOCALE: Locale = 'en';
 const LOCAL_SETTINGS_KEY = 'billBlissSettings'; // For user preferences like locale, default income
 
 const PREDEFINED_BILLS_CONFIG: BillConfig[] = [
@@ -78,7 +77,7 @@ export default function HomePage() {
 
   const [isClient, setIsClient] = useState(false);
   // User settings from localStorage
-  const [userSettings, setUserSettings] = useState<Omit<AppStorage, 'allMonthlyData'>>({ userLocale: DEFAULT_LOCALE, defaultIncome: 0, defaultIncomeSourceName: '' });
+  const [userSettings, setUserSettings] = useState<Omit<AppStorage, 'allMonthlyData'>>({ userLocale: getLocale(), defaultIncome: 0, defaultIncomeSourceName: '' });
 
 
   const [selectedYear, setSelectedYear] = useState<number>(getYear(new Date()));
@@ -811,101 +810,104 @@ useEffect(() => {
               {bills.map(bill => (
                 <div 
                   key={bill.id} 
-                  className="flex flex-col sm:flex-row sm:items-center sm:gap-x-4 p-3 border-b last:border-b-0 hover:bg-muted/50 transition-colors rounded-md"
+                  className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 border-b last:border-b-0 hover:bg-muted/50 transition-colors rounded-md"
                 >
                   {/* Icon and Name group */}
-                  <div className="flex items-center gap-3 w-full sm:w-auto sm:flex-none sm:order-1 mb-2 sm:mb-0">
+                  <div className="flex items-center gap-3 mr-auto"> {/* mr-auto pushes controls group if on same line (desktop) or to next line (mobile) */}
                     <bill.icon className="h-7 w-7 text-accent flex-shrink-0"/>
                     <p className="font-medium truncate text-card-foreground flex-1">{bill.name}</p>
                   </div>
 
-                  {/* Income Source Select */}
-                  <div className="w-full sm:flex-1 sm:min-w-0 sm:max-w-[200px] sm:order-2 mb-2 sm:mb-0">
-                    <Select
-                      value={bill.incomeSourceId || "unassigned"}
-                      onValueChange={(value) => handleBillIncomeSourceChange(bill.id, value)}
-                    >
-                      <SelectTrigger className="h-8 text-xs w-full">
-                         <SelectValue placeholder={t('home.bills.unassignedIncomeSource')} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="unassigned">{t('home.bills.unassignedIncomeSource')}</SelectItem>
-                        {incomeSources.length > 0 ? (
-                          incomeSources.map(source => (
-                            <SelectItem key={source.id} value={source.id}>{source.name}</SelectItem>
-                          ))
-                        ) : (
-                          <SelectItem value="no-sources" disabled>{t('home.bills.noIncomeSourcesAvailable')}</SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  
-                  {/* Amount Input */}
-                  <div className="w-full sm:w-28 sm:order-3 mb-2 sm:mb-0 sm:ml-auto">
-                    <Input
-                      id={`bill-amount-${bill.id}`}
-                      type="text" 
-                      value={(bill as any).rawAmountDisplay ?? (bill.amount === 0 && !(bill as any).rawAmountDisplay?.trim() ? '' : formatCurrency(bill.amount))}
-                      onChange={(e) => handleBillAmountRawChange(bill.id, e.target.value)}
-                      onBlur={() => handleBillAmountBlur(bill.id)}
-                      placeholder={t('home.addBillModal.amountPlaceholder')}
-                      className="w-full text-right text-sm"
-                      aria-label={`${bill.name} ${t('home.addBillModal.amountLabel')}`}
-                    />
-                  </div>
+                  {/* Controls Group: Payer Select, Amount, Buttons */}
+                  <div className="flex flex-row flex-wrap items-center justify-end gap-2 w-full sm:w-auto mt-2 sm:mt-0">
+                    {/* Income Source Select Div */}
+                    <div className="min-w-[140px] flex-auto xs:flex-initial xs:w-auto sm:max-w-[170px] md:max-w-[190px]">
+                      <Select
+                        value={bill.incomeSourceId || "unassigned"}
+                        onValueChange={(value) => handleBillIncomeSourceChange(bill.id, value)}
+                      >
+                        <SelectTrigger className="h-8 text-xs w-full">
+                          <SelectValue placeholder={t('home.bills.unassignedIncomeSource')} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="unassigned">{t('home.bills.unassignedIncomeSource')}</SelectItem>
+                          {incomeSources.length > 0 ? (
+                            incomeSources.map(source => (
+                              <SelectItem key={source.id} value={source.id}>{source.name}</SelectItem>
+                            ))
+                          ) : (
+                            <SelectItem value="no-sources" disabled>{t('home.bills.noIncomeSourcesAvailable')}</SelectItem>
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    
+                    {/* Amount Input Div */}
+                    <div className="min-w-[100px] w-full xs:w-auto xs:max-w-[120px] sm:w-28">
+                      <Input
+                        id={`bill-amount-${bill.id}`}
+                        type="text" 
+                        value={(bill as any).rawAmountDisplay ?? (bill.amount === 0 && !(bill as any).rawAmountDisplay?.trim() ? '' : formatCurrency(bill.amount))}
+                        onChange={(e) => handleBillAmountRawChange(bill.id, e.target.value)}
+                        onBlur={() => handleBillAmountBlur(bill.id)}
+                        placeholder={t('home.addBillModal.amountPlaceholder')}
+                        className="w-full text-right text-sm"
+                        aria-label={`${bill.name} ${t('home.addBillModal.amountLabel')}`}
+                      />
+                    </div>
 
-                  {/* Action Buttons */}
-                  <div className="flex items-center gap-1 w-full sm:w-auto sm:order-4 justify-start sm:justify-end">
-                    <TooltipProvider delayDuration={100}>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleReplicateBill(bill)}
-                            aria-label={t('home.bills.tooltip.replicateBill')}
-                            className="h-9 w-9" 
-                          >
-                            <ArrowRightCircle className="h-5 w-5"/>
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent><p>{t('home.bills.tooltip.replicateBill')}</p></TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <TooltipProvider delayDuration={100}>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="text-destructive hover:text-destructive/90 hover:bg-destructive/10 h-9 w-9"
-                                        aria-label={t('home.bills.tooltip.deleteBill')}
-                                    >
-                                        <Trash2 className="h-5 w-5"/>
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent><p>{t('home.bills.tooltip.deleteBill')}</p></TooltipContent>
-                            </Tooltip>
-                        </TooltipProvider>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>{t('home.deleteBillModal.title')}</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            {t('home.deleteBillModal.description', { billName: bill.name })}
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>{t('generic.cancel')}</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => handleDeleteBill(bill.id)} className="bg-destructive hover:bg-destructive/90">
-                            {t('generic.delete')}
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
+                    {/* Action Buttons Div */}
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <TooltipProvider delayDuration={100}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleReplicateBill(bill)}
+                              aria-label={t('home.bills.tooltip.replicateBill')}
+                              className="h-9 w-9" 
+                            >
+                              <ArrowRightCircle className="h-5 w-5"/>
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent><p>{t('home.bills.tooltip.replicateBill')}</p></TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <TooltipProvider delayDuration={100}>
+                              <Tooltip>
+                                  <TooltipTrigger asChild>
+                                      <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          className="text-destructive hover:text-destructive/90 hover:bg-destructive/10 h-9 w-9"
+                                          aria-label={t('home.bills.tooltip.deleteBill')}
+                                      >
+                                          <Trash2 className="h-5 w-5"/>
+                                      </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent><p>{t('home.bills.tooltip.deleteBill')}</p></TooltipContent>
+                              </Tooltip>
+                          </TooltipProvider>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>{t('home.deleteBillModal.title')}</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              {t('home.deleteBillModal.description', { billName: bill.name })}
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>{t('generic.cancel')}</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => handleDeleteBill(bill.id)} className="bg-destructive hover:bg-destructive/90">
+                              {t('generic.delete')}
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
                   </div>
                 </div>
               ))}
