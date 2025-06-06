@@ -2,126 +2,165 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DollarSign, Languages, Save, Loader2, Edit } from 'lucide-react'; 
-import type { AppStorage, Locale } from '@/types';
+import type { UserSettings, Locale, UserJWTPayload } from '@/types';
 import { useToast } from "@/hooks/use-toast";
 import { useLocalization } from '@/hooks/use-localization';
+import { getUserSession } from '@/actions/auth';
+import { getUserSettings, saveUserSettings } from '@/actions/user-settings';
 
-const LOCAL_SETTINGS_KEY = 'billBlissSettings'; // Key for localStorage
+const LOCAL_STORAGE_SETTINGS_KEY = 'billBlissSettings_legacy'; // For migration
 
 export default function SettingsPage() {
-  const { t, locale, setLocale: setGlobalLocale, formatCurrency, parseCurrency, getLocale } = useLocalization();
+  const { t, locale: currentGlobalLocale, setLocale: setGlobalLocale, formatCurrency, parseCurrency } = useLocalization();
   const { toast } = useToast();
+  const router = useRouter();
 
+  const [session, setSession] = useState<UserJWTPayload | null>(null);
   const [isClient, setIsClient] = useState(false);
-  // State for settings, loaded from localStorage
+  const [isLoading, setIsLoading] = useState(true);
+
   const [localDefaultIncome, setLocalDefaultIncome] = useState<number>(0);
   const [localDefaultIncomeDisplay, setLocalDefaultIncomeDisplay] = useState('');
   const [localDefaultIncomeSourceName, setLocalDefaultIncomeSourceName] = useState('');
-  const [currentLanguage, setCurrentLanguage] = useState<Locale>(locale);
+  const [currentLanguage, setCurrentLanguage] = useState<Locale>(currentGlobalLocale);
 
-
-  // Load settings from localStorage on mount
   useEffect(() => {
     setIsClient(true);
-    setCurrentLanguage(getLocale()); // Initialize with global locale
-    try {
-      const storedSettingsString = localStorage.getItem(LOCAL_SETTINGS_KEY);
-      if (storedSettingsString) {
-        const parsedSettings: Omit<AppStorage, 'allMonthlyData'> = JSON.parse(storedSettingsString);
-        
-        const loadedDefaultIncome = parsedSettings.defaultIncome || 0;
-        setLocalDefaultIncome(loadedDefaultIncome);
-        setLocalDefaultIncomeDisplay(formatCurrency(loadedDefaultIncome)); // Format for display
-        setLocalDefaultIncomeSourceName(parsedSettings.defaultIncomeSourceName || '');
-
-        if (parsedSettings.userLocale && (parsedSettings.userLocale === 'en' || parsedSettings.userLocale === 'pt')) {
-          setCurrentLanguage(parsedSettings.userLocale);
-          // No need to setGlobalLocale here as it's derived from LocalizationContext or set by user interaction
-        }
-      } else {
-        // If no settings in localStorage, initialize display for 0
-        setLocalDefaultIncomeDisplay(formatCurrency(0));
-        setLocalDefaultIncomeSourceName('');
+    const loadAuthAndSettings = async () => {
+      setIsLoading(true);
+      const currentSession = await getUserSession();
+      if (!currentSession) {
+        router.push('/login?next=/settings');
+        return;
       }
-    } catch (error) {
-      console.error("Failed to load settings from localStorage:", error);
-      toast({
-        variant: "destructive",
-        title: t('toast.errorLoadingSettings.title'),
-        description: t('toast.errorLoadingSettings.description'),
-      });
-      setLocalDefaultIncomeDisplay(formatCurrency(0)); // Fallback display
-      setLocalDefaultIncomeSourceName('');
-    }
-  }, [toast, t, formatCurrency, getLocale]); // formatCurrency and getLocale are stable from useLocalization
+      setSession(currentSession);
 
-  // Update display when locale changes (e.g., currency format) or defaultIncome changes
-   useEffect(() => {
-    if(isClient) { // Ensure this runs only client-side after initial load
+      try {
+        let settings = await getUserSettings(currentSession.userId);
+
+        // One-time migration from localStorage
+        const legacySettingsString = localStorage.getItem(LOCAL_STORAGE_SETTINGS_KEY);
+        if (legacySettingsString) {
+          try {
+            const legacySettings = JSON.parse(legacySettingsString);
+            // Check if DB settings are still default or non-existent for this user, and legacy exists
+            if (settings && settings.defaultIncome === 0 && legacySettings.defaultIncome > 0) {
+                const migratedSettings: Partial<Omit<UserSettings, '_id' | 'userId'>> = {
+                    userLocale: legacySettings.userLocale || currentGlobalLocale,
+                    defaultIncome: legacySettings.defaultIncome || 0,
+                    defaultIncomeSourceName: legacySettings.defaultIncomeSourceName || '',
+                };
+                settings = await saveUserSettings(currentSession.userId, migratedSettings);
+                toast({ title: t('settings.toast.migrated.title'), description: t('settings.toast.migrated.description') });
+                localStorage.removeItem(LOCAL_STORAGE_SETTINGS_KEY); // Remove after successful migration
+            } else {
+                 localStorage.removeItem(LOCAL_STORAGE_SETTINGS_KEY); // Remove if not migrating to avoid re-check
+            }
+          } catch (e) {
+            console.error("Error migrating legacy settings:", e);
+            localStorage.removeItem(LOCAL_STORAGE_SETTINGS_KEY); // Remove corrupted legacy settings
+          }
+        }
+        
+        if (settings) {
+          setLocalDefaultIncome(settings.defaultIncome || 0);
+          setLocalDefaultIncomeDisplay(formatCurrency(settings.defaultIncome || 0));
+          setLocalDefaultIncomeSourceName(settings.defaultIncomeSourceName || '');
+          setCurrentLanguage(settings.userLocale);
+          if (settings.userLocale !== currentGlobalLocale) {
+            setGlobalLocale(settings.userLocale);
+          }
+        } else {
+          // Should not happen if getUserSettings returns defaults, but as a fallback:
+          setLocalDefaultIncomeDisplay(formatCurrency(0));
+        }
+
+      } catch (error) {
+        console.error("Failed to load user settings:", error);
+        toast({
+          variant: "destructive",
+          title: t('toast.errorLoadingSettings.title'),
+          description: (error as Error).message,
+        });
+        setLocalDefaultIncomeDisplay(formatCurrency(0));
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadAuthAndSettings();
+  }, [router, toast, t, formatCurrency, setGlobalLocale, currentGlobalLocale]);
+
+
+  useEffect(() => {
+    if(isClient && !isLoading) { 
         setLocalDefaultIncomeDisplay(formatCurrency(localDefaultIncome));
-        setCurrentLanguage(getLocale()); // Keep language state in sync with global context
     }
-  }, [locale, localDefaultIncome, formatCurrency, getLocale, isClient]);
+  }, [currentGlobalLocale, localDefaultIncome, formatCurrency, isClient, isLoading]);
 
 
   const handleDefaultIncomeInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    // For direct input, allow users to type freely, validation/parsing on blur or save
     setLocalDefaultIncomeDisplay(event.target.value);
   };
 
   const handleDefaultIncomeInputBlur = () => {
     const numericValue = parseCurrency(localDefaultIncomeDisplay);
-    setLocalDefaultIncome(numericValue); // Update numeric state
-    setLocalDefaultIncomeDisplay(formatCurrency(numericValue)); // Re-format for display
+    setLocalDefaultIncome(numericValue); 
+    setLocalDefaultIncomeDisplay(formatCurrency(numericValue)); 
   };
 
   const handleLanguageChange = (value: string) => {
     if (value === 'en' || value === 'pt') {
       const newLocale = value as Locale;
-      setGlobalLocale(newLocale); // Update global context
-      setCurrentLanguage(newLocale); // Update local state for select component
+      setGlobalLocale(newLocale); 
+      setCurrentLanguage(newLocale); 
     }
   };
 
-  const handleSaveChanges = useCallback(() => {
-    if (!isClient) return;
+  const handleSaveChanges = useCallback(async () => {
+    if (!isClient || !session?.userId) {
+        toast({ variant: 'destructive', title: t('generic.error'), description: t('settings.toast.notAuthenticated')});
+        return;
+    }
+    setIsLoading(true);
     try {
       const numericDefaultIncome = parseCurrency(localDefaultIncomeDisplay);
-      // Ensure numeric state is also up-to-date if blur didn't fire for some reason
       setLocalDefaultIncome(numericDefaultIncome); 
 
-      const settingsToSave: Omit<AppStorage, 'allMonthlyData'> = {
+      const settingsToSave: Partial<Omit<UserSettings, '_id' | 'userId'>> = {
         defaultIncome: numericDefaultIncome,
         defaultIncomeSourceName: localDefaultIncomeSourceName.trim(),
-        userLocale: getLocale(), // Get current global locale
+        userLocale: currentLanguage, 
       };
 
-      localStorage.setItem(LOCAL_SETTINGS_KEY, JSON.stringify(settingsToSave));
+      await saveUserSettings(session.userId, settingsToSave);
       toast({
         title: t('toast.settingsSaved.title'),
         description: t('toast.settingsSaved.description'),
       });
     } catch (error) {
-      console.error("Failed to save settings to localStorage:", error);
+      console.error("Failed to save settings to DB:", error);
       toast({
         variant: "destructive",
         title: t('toast.errorSavingSettings.title'),
-        description: t('toast.errorSavingSettings.description'),
+        description: (error as Error).message,
       });
+    } finally {
+        setIsLoading(false);
     }
-  }, [isClient, toast, t, getLocale, parseCurrency, localDefaultIncomeDisplay, localDefaultIncomeSourceName, setGlobalLocale]);
+  }, [isClient, session, toast, t, parseCurrency, localDefaultIncomeDisplay, localDefaultIncomeSourceName, currentLanguage]);
 
-  if (!isClient) {
+  if (!isClient || isLoading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[calc(100vh-56px)] p-4 sm:p-8 bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
-        <p className="mt-4 text-lg text-foreground">{t('settings.loading')}</p>
+        <p className="mt-4 text-lg text-foreground">{isLoading ? t('settings.loading') : t('app.loadingAuth')}</p>
       </div>
     );
   }
@@ -150,13 +189,14 @@ export default function SettingsPage() {
             <Label htmlFor="defaultIncome" className="text-sm font-medium">{t('settings.defaultIncomeCard.label')}</Label>
             <Input
               id="defaultIncome"
-              type="text" // Kept as text for better control over display and parsing
+              type="text"
               value={localDefaultIncomeDisplay}
               onChange={handleDefaultIncomeInputChange}
               onBlur={handleDefaultIncomeInputBlur}
               placeholder={t('currency.placeholder', { exampleAmount: formatCurrency(0)})}
               className="mt-1 text-lg"
               aria-label={t('settings.defaultIncomeCard.label')}
+              disabled={isLoading}
             />
           </CardContent>
         </Card>
@@ -181,6 +221,7 @@ export default function SettingsPage() {
               placeholder={t('settings.primaryIncomeNameCard.placeholder')}
               className="mt-1 text-lg"
               aria-label={t('settings.primaryIncomeNameCard.label')}
+              disabled={isLoading}
             />
           </CardContent>
         </Card>
@@ -195,7 +236,7 @@ export default function SettingsPage() {
           </CardHeader>
           <CardContent>
             <Label htmlFor="language" className="text-sm font-medium">{t('settings.languageCard.label')}</Label>
-            <Select value={currentLanguage} onValueChange={handleLanguageChange}>
+            <Select value={currentLanguage} onValueChange={handleLanguageChange} disabled={isLoading}>
               <SelectTrigger id="language" className="mt-1 text-lg" aria-label={t('settings.languageCard.label')}>
                 <SelectValue placeholder={t('settings.languageCard.label')} />
               </SelectTrigger>
@@ -208,8 +249,8 @@ export default function SettingsPage() {
         </Card>
 
         <div className="flex justify-end">
-          <Button onClick={handleSaveChanges} className="text-lg px-6 py-3">
-            <Save className="mr-2 h-5 w-5" />
+          <Button onClick={handleSaveChanges} className="text-lg px-6 py-3" disabled={isLoading}>
+            {isLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Save className="mr-2 h-5 w-5" />}
             {t('settings.saveButton')}
           </Button>
         </div>

@@ -16,6 +16,7 @@ export interface Bill {
   amount: number;
   isCustom?: boolean;
   incomeSourceId?: string; // ID of the income source paying this bill
+  rawAmountDisplay?: string; // Temporary for UI editing
 }
 
 export interface StoredBillData {
@@ -33,9 +34,10 @@ export interface IncomeSource {
   amount: number;
 }
 
-// Represents data for a specific month and year
+// Represents data for a specific month and year, tied to a user
 export interface MonthlyData {
   _id?: string; // MongoDB ObjectId as string
+  userId: string; // Foreign key to User collection
   year: number;
   month: number; // 1 for January, 12 for December
   incomeSources: IncomeSource[];
@@ -44,11 +46,32 @@ export interface MonthlyData {
 
 export type Locale = 'en' | 'pt';
 
-// AppStorage now primarily handles user settings stored in localStorage.
-// Monthly financial data is managed via MongoDB.
-export interface AppStorage {
+// User settings, stored in MongoDB and associated with a user
+export interface UserSettings {
+  _id?: string; // MongoDB ObjectId as string
+  userId: string; // Foreign key to User collection
   userLocale: Locale;
   defaultIncome?: number;
   defaultIncomeSourceName?: string;
-  // allMonthlyData: MonthlyData[]; // This is now removed and handled by MongoDB
 }
+
+// User model for authentication
+export interface User {
+  _id?: string; // MongoDB ObjectId as string
+  name: string;
+  username: string; // Should be unique
+  passwordHash: string;
+}
+
+// Payload for JWT
+export interface UserJWTPayload {
+  userId: string;
+  username: string;
+}
+
+// AppStorage is deprecated, replaced by UserSettings in MongoDB
+// export interface AppStorage {
+//   userLocale: Locale;
+//   defaultIncome?: number;
+//   defaultIncomeSourceName?: string;
+// }

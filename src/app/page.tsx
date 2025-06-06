@@ -2,7 +2,8 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import Link from 'next/link';
+import Link from 'next/link'; // Keep for potential future use, not directly used now
+import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,7 +18,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { PieChart as ChartIcon, Droplet, Zap, Wifi, Home, DollarSign, LineChart, AlertCircle, Loader2, Brain, Receipt, PlusCircle, CalendarDays, Edit3, Trash2, Landmark, ArrowRightCircle } from 'lucide-react';
 import { Pie, PieChart, Cell, ResponsiveContainer } from 'recharts';
 import { ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from "@/components/ui/chart";
-import type { Bill, BillConfig, StoredBillData, MonthlyData, AppStorage, Locale, IncomeSource } from '@/types';
+import type { Bill, BillConfig, StoredBillData, MonthlyData, Locale, IncomeSource, UserJWTPayload, UserSettings } from '@/types';
 import { getSpendingInsights } from '@/ai/flows/spending-insights';
 import type { SpendingInsightsInput, SpendingInsightsOutput } from '@/ai/flows/spending-insights';
 import { siteConfig } from '@/config/site';
@@ -26,10 +27,10 @@ import { useLocalization } from '@/hooks/use-localization';
 import { format, getYear, getMonth, addMonths } from 'date-fns';
 import { enUS, ptBR } from 'date-fns/locale';
 import { getMonthlyData, saveMonthlyData } from '@/actions/financial-data';
+import { getUserSession } from '@/actions/auth';
+import { getUserSettings } from '@/actions/user-settings'; // Assuming you have this action
 
-const LOCAL_SETTINGS_KEY = 'billBlissSettings'; // For user preferences like locale, default income
-const DEFAULT_LOCALE: Locale = 'en';
-
+const DEFAULT_LOCALE_PAGE: Locale = 'en'; // Renamed to avoid conflict if any global DEFAULT_LOCALE exists
 
 const PREDEFINED_BILLS_CONFIG: BillConfig[] = [
   { id: 'water', nameKey: 'home.bills.water', defaultName: 'Water Bill', icon: Droplet },
@@ -74,19 +75,22 @@ const generateYearOptions = () => {
 
 
 export default function HomePage() {
-  const { t, formatCurrency, parseCurrency, getLocale, locale } = useLocalization();
+  const { t, formatCurrency, parseCurrency, getLocale, locale, setLocale } = useLocalization();
   const { toast } = useToast();
+  const router = useRouter();
 
+  const [session, setSession] = useState<UserJWTPayload | null>(null);
+  const [userSettings, setUserSettings] = useState<UserSettings | null>(null);
+  
   const [isClient, setIsClient] = useState(false);
-  // User settings from localStorage
-  const [userSettings, setUserSettings] = useState<Omit<AppStorage, 'allMonthlyData'>>({ userLocale: DEFAULT_LOCALE, defaultIncome: 0, defaultIncomeSourceName: '' });
-
-
+  
   const [selectedYear, setSelectedYear] = useState<number>(getYear(new Date()));
   const [selectedMonth, setSelectedMonth] = useState<number>(getMonth(new Date()) + 1);
 
   const [currentMonthlyData, setCurrentMonthlyData] = useState<MonthlyData | null>(null);
   const [isLoadingMonthlyData, setIsLoadingMonthlyData] = useState<boolean>(true);
+  const [isLoadingAuth, setIsLoadingAuth] = useState<boolean>(true);
+
 
   const [incomeSources, setIncomeSources] = useState<IncomeSource[]>([]);
   const [bills, setBills] = useState<Bill[]>([]);
@@ -110,12 +114,40 @@ export default function HomePage() {
   
   const dataSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Load session and user settings
+  useEffect(() => {
+    setIsClient(true);
+    const loadAuthData = async () => {
+      setIsLoadingAuth(true);
+      const currentSession = await getUserSession();
+      if (!currentSession) {
+        router.push('/login?next=/');
+        return;
+      }
+      setSession(currentSession);
+      
+      try {
+        const settings = await getUserSettings(currentSession.userId);
+        setUserSettings(settings);
+        if (settings?.userLocale && settings.userLocale !== getLocale()) {
+          setLocale(settings.userLocale); // Sync localization context with user's preference
+        }
+      } catch (error) {
+        console.error("Failed to load user settings:", error);
+        toast({ variant: "destructive", title: t('toast.errorLoadingSettings.title'), description: (error as Error).message });
+        // Fallback to default settings structure if fetch fails
+        setUserSettings({ userId: currentSession.userId, userLocale: getLocale(), defaultIncome: 0, defaultIncomeSourceName: '' });
+      } finally {
+        setIsLoadingAuth(false);
+      }
+    };
+    loadAuthData();
+  }, [router, toast, t, getLocale, setLocale]);
+
 
   const yearOptions = useMemo(() => generateYearOptions(), []);
   const monthOptions = useMemo(() => generateMonthOptions(t, locale), [t, locale]);
   
-
-
   const getDecimalSeparator = useCallback(() => (locale === 'pt' ? ',' : '.'), [locale]);
 
   const sanitizeNumericInput = useCallback((value: string) => {
@@ -138,8 +170,6 @@ export default function HomePage() {
     if (/^0+$/.test(sanitized) && sanitized.length > 1) {
         sanitized = "0";
     }
-
-
     return sanitized;
   }, [getDecimalSeparator]);
   
@@ -161,7 +191,7 @@ export default function HomePage() {
           icon: Receipt, 
         };
       }
-      const config = PREDEFINED_BILLS_CONFIG.find(pb => pb.id === storedBill.id || pb.id === storedBill.nameKey); // Check nameKey too
+      const config = PREDEFINED_BILLS_CONFIG.find(pb => pb.id === storedBill.id || pb.id === storedBill.nameKey);
       if (config) {
         return {
           ...baseBill,
@@ -180,46 +210,14 @@ export default function HomePage() {
     return Array.from(new Map(mapped.map(item => [item.id, item])).values());
   }, [t, formatCurrency]);
 
-
-  // Load user settings from localStorage
-  useEffect(() => {
-    setIsClient(true);
-    try {
-      const storedSettingsString = localStorage.getItem(LOCAL_SETTINGS_KEY);
-      let parsedSettings;
-      if (storedSettingsString) {
-        parsedSettings = JSON.parse(storedSettingsString);
-      }
-      const validatedSettings: Omit<AppStorage, 'allMonthlyData'> = {
-        userLocale: (parsedSettings?.userLocale === 'en' || parsedSettings?.userLocale === 'pt') ? parsedSettings.userLocale : getLocale(),
-        defaultIncome: typeof parsedSettings?.defaultIncome === 'number' ? parsedSettings.defaultIncome : 0,
-        defaultIncomeSourceName: typeof parsedSettings?.defaultIncomeSourceName === 'string' ? parsedSettings.defaultIncomeSourceName : '',
-      };
-      setUserSettings(validatedSettings);
-
-      if (!storedSettingsString) {
-        localStorage.setItem(LOCAL_SETTINGS_KEY, JSON.stringify(validatedSettings));
-      }
-    } catch (error) {
-      console.error("Failed to load user settings from localStorage:", error);
-      toast({
-        variant: "destructive",
-        title: t('toast.errorLoadingData.title'),
-        description: t('toast.errorLoadingData.description'),
-      });
-       setUserSettings({ userLocale: getLocale(), defaultIncome: 0, defaultIncomeSourceName: '' });
-    }
-  }, [toast, t, getLocale]);
-
-
  // Effect to load or initialize monthly data from MongoDB
 useEffect(() => {
-    if (!isClient) return;
+    if (!isClient || !session?.userId || !userSettings || isLoadingAuth) return;
     setIsLoadingMonthlyData(true);
 
     async function loadData() {
       try {
-        let existingMonthData = await getMonthlyData(selectedYear, selectedMonth);
+        let existingMonthData = await getMonthlyData(session!.userId, selectedYear, selectedMonth);
         let finalMonthData: MonthlyData;
 
         if (existingMonthData) {
@@ -251,9 +249,9 @@ useEffect(() => {
           const uniqueIncomeSources = Array.from(new Map(resolvedIncomeSources.map(item => [item.id, item])).values());
           const uniqueStoredBills = Array.from(new Map(resolvedStoredBills.map(item => [item.id, item])).values());
 
-
           finalMonthData = {
             ...existingMonthData,
+            userId: session!.userId,
             incomeSources: uniqueIncomeSources,
             bills: uniqueStoredBills,
           };
@@ -270,6 +268,7 @@ useEffect(() => {
           }];
           
           finalMonthData = {
+            userId: session!.userId,
             year: selectedYear,
             month: selectedMonth,
             incomeSources: initialIncomeSources,
@@ -288,12 +287,13 @@ useEffect(() => {
       } catch (error) {
         console.error("Error in data loading/initialization:", error);
         toast({ variant: "destructive", title: t('toast.errorLoadingData.title'), description: (error as Error).message });
-         const primaryIncomeName = userSettings.defaultIncomeSourceName?.trim()
+        const primaryIncomeName = userSettings.defaultIncomeSourceName?.trim()
             ? userSettings.defaultIncomeSourceName
             : t('home.incomeSources.defaultPrimaryName');
         
         const fallbackIncomeSources = [{id: `primary-${selectedYear}-${selectedMonth}-${Date.now()}`, name: primaryIncomeName, amount: userSettings.defaultIncome || 0}];
         setCurrentMonthlyData({
+            userId: session!.userId,
             year: selectedYear, month: selectedMonth, 
             incomeSources: fallbackIncomeSources, 
             bills: []
@@ -305,7 +305,7 @@ useEffect(() => {
       }
     }
     loadData();
-  }, [isClient, selectedYear, selectedMonth, userSettings.defaultIncome, userSettings.defaultIncomeSourceName, t, mapStoredDataToBills, toast]);
+  }, [isClient, session, userSettings, selectedYear, selectedMonth, t, mapStoredDataToBills, toast, isLoadingAuth]);
 
 
   // Debounced save to MongoDB
@@ -314,10 +314,11 @@ useEffect(() => {
       clearTimeout(dataSaveTimeoutRef.current);
     }
     dataSaveTimeoutRef.current = setTimeout(async () => {
-      if (currentMonthlyData) {
+      if (currentMonthlyData && session?.userId) { // Ensure session and userId exist
         try {
           const dataToSave: MonthlyData = {
             ...currentMonthlyData,
+            userId: session.userId, // Ensure userId is part of the data to save
             incomeSources: incomeSources, 
             bills: billsToStoredBillsArray(bills.map(b => ({...b, amount: b.amount || 0}))),
           };
@@ -329,31 +330,30 @@ useEffect(() => {
         }
       }
     }, 1500); 
-  }, [currentMonthlyData, incomeSources, bills, toast]);
+  }, [currentMonthlyData, incomeSources, bills, toast, session]);
 
   useEffect(() => {
-    if (!isLoadingMonthlyData && isClient && currentMonthlyData) { 
+    if (!isLoadingMonthlyData && !isLoadingAuth && isClient && currentMonthlyData && session?.userId) { 
       scheduleSaveToDb();
     }
-  }, [incomeSources, bills, isLoadingMonthlyData, isClient, currentMonthlyData, scheduleSaveToDb]);
+  }, [incomeSources, bills, isLoadingMonthlyData, isLoadingAuth, isClient, currentMonthlyData, scheduleSaveToDb, session]);
 
 
    useEffect(() => {
+    // Translate bill names when locale changes or bills are loaded
     if (isClient && bills.length > 0) {
         setBills(currentBills => currentBills.map(bill => ({
           ...bill,
           name: bill.isCustom ? bill.name : (t(bill.nameKey || PREDEFINED_BILLS_CONFIG.find(pb => pb.id === bill.id)?.nameKey || '') || PREDEFINED_BILLS_CONFIG.find(pb => pb.id === bill.id)?.defaultName || t('home.bills.customBillFallback'))
         })));
     }
-  }, [t, locale, isClient]); 
+  }, [t, locale, isClient]); // Removed bills from dependencies to avoid loop, mapStoredDataToBills handles initial translation
 
   const handleBillAmountRawChange = (billId: string, rawValue: string) => {
     const sanitized = sanitizeNumericInput(rawValue);
-    const numericValue = parseCurrency(sanitized); 
-
     setBills(prevBills =>
       prevBills.map(bill =>
-        bill.id === billId ? { ...bill, amount: numericValue, rawAmountDisplay: sanitized } : bill
+        bill.id === billId ? { ...bill, rawAmountDisplay: sanitized, amount: parseCurrency(sanitized) || 0 } : bill
       )
     );
   };
@@ -362,21 +362,13 @@ useEffect(() => {
     setBills(prevBills =>
       prevBills.map(bill => {
         if (bill.id === billId) {
-          const currentAmount = bill.amount || 0;
           let displayValue = bill.rawAmountDisplay || '';
-
-          if (currentAmount === 0 && (displayValue === formatCurrency(0) || displayValue === "0" || displayValue === "")) {
+          if (bill.amount === 0) {
             displayValue = ''; // Show empty for zero for easier typing
           } else {
-            // Convert fully formatted string to simpler number string for editing
-             displayValue = sanitizeNumericInput(String(currentAmount).replace('.', getDecimalSeparator()));
+            // Ensure it's a plain number string for editing
+            displayValue = sanitizeNumericInput(String(bill.amount).replace('.', getDecimalSeparator()));
           }
-          // If rawAmountDisplay was already a simple number, it might be fine. This ensures it is simplified.
-          if (bill.rawAmountDisplay && bill.rawAmountDisplay.match(/^[0-9,.]*$/) && parseCurrency(bill.rawAmountDisplay) === currentAmount) {
-              displayValue = bill.rawAmountDisplay; // Keep it if it's already a "raw" valid number
-          }
-
-
           return { ...bill, rawAmountDisplay: displayValue };
         }
         return bill;
@@ -396,7 +388,6 @@ useEffect(() => {
     });
   };
   
-
   const handleBillIncomeSourceChange = (billId: string, sourceId: string) => {
     setBills(prevBills => 
         prevBills.map(bill =>
@@ -404,7 +395,6 @@ useEffect(() => {
       )
     );
   };
-
 
   const totalIncome = useMemo(() => {
     return incomeSources.reduce((total, source) => total + (source.amount || 0), 0);
@@ -426,7 +416,7 @@ useEffect(() => {
 
 
   const handleGenerateInsights = useCallback(async () => {
-    if (!currentMonthlyData) return;
+    if (!currentMonthlyData || !session?.userId) return;
     setIsLoadingInsights(true);
     setErrorInsights(null);
     setInsights(null); 
@@ -467,7 +457,7 @@ useEffect(() => {
     } finally {
       setIsLoadingInsights(false);
     }
-  }, [currentMonthlyData, toast, t, getLocale, bills]);
+  }, [currentMonthlyData, toast, t, getLocale, bills, session]);
 
   const openAddBillModal = () => {
     setNewBillName('');
@@ -505,7 +495,6 @@ useEffect(() => {
     setNewBillAmountRaw(formatCurrency(parsed));
   };
 
-
   const handleAddNewBill = () => {
     const parsedAmount = parseCurrency(newBillAmountRaw); 
   
@@ -517,11 +506,10 @@ useEffect(() => {
         toast({ variant: "destructive", title: t('generic.error'), description: t('home.addBillModal.validation.amountMustBePositiveOrZero') });
         return;
     }
-    if (parsedAmount <= 0 && newBillAmountRaw.trim() !== sanitizeNumericInput(formatCurrency(0)) && newBillAmountRaw.trim() !== "0" && newBillAmountRaw.trim() !== '') {
+     if (parsedAmount <= 0 && newBillAmountRaw.trim() !== sanitizeNumericInput(formatCurrency(0)) && newBillAmountRaw.trim() !== "0" && newBillAmountRaw.trim() !== '') {
          toast({ variant: "destructive", title: t('generic.error'), description: t('home.addBillModal.validation.amountRequired') });
          return;
     }
-
 
     const newBillEntry: Bill = {
       id: newBillIsCustom || !newBillPredefinedId ? `custom-${Date.now()}` : newBillPredefinedId,
@@ -546,7 +534,6 @@ useEffect(() => {
   };
 
   const handleDeleteBill = (billIdToDelete: string) => {
-    console.log('[DEBUG] Attempting to delete bill with ID:', billIdToDelete);
     const billToDelete = bills.find(b => b.id === billIdToDelete);
 
     if (!billToDelete) {
@@ -554,14 +541,11 @@ useEffect(() => {
       toast({ variant: "destructive", title: t('generic.error'), description: `Bill not found for deletion. ID: ${billIdToDelete}`});
       return;
     }
-    console.log('[DEBUG] Bill found for deletion:', billToDelete);
 
     setBills(prevBills => {
-      console.log('[DEBUG] Previous bills count:', prevBills.length, 'IDs:', prevBills.map(b => b.id));
       const newBills = prevBills.filter(bill => bill.id !== billIdToDelete);
-      console.log('[DEBUG] New bills count after filter:', newBills.length, 'IDs:', newBills.map(b => b.id));
       if (prevBills.length === newBills.length && prevBills.length > 0) {
-          console.warn(`[DEBUG] Filter with ID '${billIdToDelete}' did not remove any bills. Please check ID matching carefully (type, case, whitespace).`);
+          console.warn(`[DEBUG] Filter with ID '${billIdToDelete}' did not remove any bills. Please check ID matching carefully.`);
       }
       return newBills;
     });
@@ -637,8 +621,8 @@ useEffect(() => {
   };
 
   const handleReplicateBill = useCallback(async (billToReplicate: Bill) => {
-    if (!currentMonthlyData) {
-        toast({ variant: "destructive", title: "Error", description: "Current month data not loaded." });
+    if (!currentMonthlyData || !session?.userId || !userSettings) {
+        toast({ variant: "destructive", title: "Error", description: "Current month data or user session not loaded." });
         return;
     }
 
@@ -648,7 +632,7 @@ useEffect(() => {
     const nextYearValue = getYear(nextMonthDate);
 
     try {
-        let nextMonthDataFromDB = await getMonthlyData(nextYearValue, nextMonthValue);
+        let nextMonthDataFromDB = await getMonthlyData(session.userId, nextYearValue, nextMonthValue);
         const replicatedStoredBill = billToStoredBill(billToReplicate);
 
         if (nextMonthDataFromDB) {
@@ -663,6 +647,7 @@ useEffect(() => {
                 ? userSettings.defaultIncomeSourceName
                 : t('home.incomeSources.defaultPrimaryName');
             nextMonthDataFromDB = {
+                userId: session.userId,
                 year: nextYearValue,
                 month: nextMonthValue,
                 incomeSources: [{
@@ -688,9 +673,8 @@ useEffect(() => {
         console.error("Error replicating bill:", error);
         toast({ variant: "destructive", title: t('toast.errorReplicatingBill.title'), description: (error as Error).message });
     }
-  }, [selectedYear, selectedMonth, userSettings, t, locale, toast, currentMonthlyData]); 
+  }, [selectedYear, selectedMonth, userSettings, t, locale, toast, currentMonthlyData, session]); 
   
-
   const topExpenses = useMemo(() => {
     return [...bills]
       .filter(bill => bill.amount > 0) 
@@ -718,7 +702,6 @@ useEffect(() => {
     });
     return config;
   }, [expenseChartData]);
-
 
   const incomeContributionChartData = useMemo(() => {
     const contributions: Record<string, { name: string; value: number; incomeSourceName: string }> = {};
@@ -751,11 +734,11 @@ useEffect(() => {
   }, [incomeContributionChartData]);
 
 
-  if (!isClient || isLoadingMonthlyData) {
+  if (!isClient || isLoadingAuth || (!isLoadingMonthlyData && !currentMonthlyData && session)) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[calc(100vh-var(--header-height,56px))] p-4 sm:p-8 bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
-        <p className="mt-4 text-lg text-foreground">{t('app.loading')}</p>
+        <p className="mt-4 text-lg text-foreground">{isLoadingAuth ? t('app.loadingAuth') : t('app.loadingData')}</p>
       </div>
     );
   }
@@ -870,15 +853,12 @@ useEffect(() => {
                   key={bill.id} 
                   className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 border-b last:border-b-0 hover:bg-muted/50 transition-colors rounded-md"
                 >
-                  {/* Icon and Name group */}
-                  <div className="flex items-center gap-3 mr-auto mb-2 sm:mb-0">
+                  <div className="flex items-center gap-3 mr-auto mb-2 sm:mb-0 sm:order-1">
                     <bill.icon className="h-7 w-7 text-accent flex-shrink-0"/>
                     <p className="font-medium truncate text-card-foreground flex-1">{bill.name}</p>
                   </div>
 
-                  {/* Controls Group: Payer Select, Amount, Buttons */}
-                  <div className="flex flex-row flex-wrap items-center justify-end gap-2 w-full sm:w-auto mt-2 sm:mt-0">
-                    {/* Income Source Select Div */}
+                  <div className="flex flex-row flex-wrap items-center justify-end gap-2 w-full sm:w-auto mt-2 sm:mt-0 sm:order-2">
                     <div className="min-w-[140px] flex-auto xs:flex-initial xs:w-auto sm:max-w-[170px] md:max-w-[190px]">
                       <Select
                         value={bill.incomeSourceId || "unassigned"}
@@ -900,7 +880,6 @@ useEffect(() => {
                       </Select>
                     </div>
                     
-                    {/* Amount Input Div */}
                     <div className="min-w-[100px] w-full xs:w-auto xs:max-w-[120px] sm:w-28">
                       <Input
                         id={`bill-amount-${bill.id}`}
@@ -915,7 +894,6 @@ useEffect(() => {
                       />
                     </div>
 
-                    {/* Action Buttons Div */}
                     <div className="flex items-center gap-1 flex-shrink-0">
                       <TooltipProvider delayDuration={100}>
                         <Tooltip>
@@ -1268,11 +1246,3 @@ useEffect(() => {
     </div>
   );
 }
-
-// This helps TypeScript understand that Bill objects might temporarily have rawAmountDisplay
-declare module '@/types' {
-    interface Bill {
-        rawAmountDisplay?: string;
-    }
-}
-
