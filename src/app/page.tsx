@@ -15,8 +15,8 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { PieChart as ChartIcon, Droplet, Zap, Wifi, Home, DollarSign, LineChart, AlertCircle, Loader2, Brain, Receipt, PlusCircle, CalendarDays, Edit3, Trash2, Landmark, ArrowRightCircle } from 'lucide-react';
-import { Pie, PieChart, Cell, ResponsiveContainer } from 'recharts';
+import { BarChart3, Droplet, Zap, Wifi, Home, DollarSign, LineChart, AlertCircle, Loader2, Brain, Receipt, PlusCircle, CalendarDays, Edit3, Trash2, Landmark, ArrowRightCircle } from 'lucide-react';
+import { Bar, BarChart, Cell, ResponsiveContainer, XAxis, YAxis } from 'recharts';
 import { ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from "@/components/ui/chart";
 import type { Bill, BillConfig, StoredBillData, MonthlyData, Locale, IncomeSource, UserJWTPayload, UserSettings } from '@/types';
 import { getSpendingInsights } from '@/ai/flows/spending-insights';
@@ -166,22 +166,30 @@ export default function HomePage() {
     const decimalSeparator = getDecimalSeparator();
     if (value === decimalSeparator) return value; 
 
+    // Regex to keep only digits and the locale-specific decimal separator
     const regex = new RegExp(`[^0-9${decimalSeparator === '.' ? '\\.' : decimalSeparator}]`, 'g');
     let sanitized = value.replace(regex, '');
   
+    // Ensure only one decimal separator
     const parts = sanitized.split(decimalSeparator);
     if (parts.length > 2) {
       sanitized = parts[0] + decimalSeparator + parts.slice(1).join('');
     }
+
+    // Remove leading zeros unless it's the only digit or followed by a separator
+    // e.g., "007" -> "7", "00.5" -> "0.5"
      if (sanitized.length > 1 && sanitized.startsWith('0') && sanitized[1] !== decimalSeparator) {
         sanitized = sanitized.substring(1);
+        // Loop to remove multiple leading zeros if user pastes "00007"
         while (sanitized.length > 1 && sanitized.startsWith('0') && sanitized[1] !== decimalSeparator) {
             sanitized = sanitized.substring(1);
         }
     }
+    // If input is "00" or "000", reduce to "0"
     if (/^0+$/.test(sanitized) && sanitized.length > 1) {
         sanitized = "0";
     }
+
     return sanitized;
   }, [getDecimalSeparator]);
   
@@ -373,12 +381,8 @@ useEffect(() => {
     setBills(prevBills =>
       prevBills.map(bill => {
         if (bill.id === billId) {
-          let displayValue = bill.rawAmountDisplay || '';
-          if (bill.amount === 0 && bill.rawAmountDisplay === formatCurrency(0)) {
-            displayValue = ''; 
-          } else {
-             displayValue = sanitizeNumericInput(bill.rawAmountDisplay || String(bill.amount));
-          }
+          // If amount is 0, show empty string for easier typing, otherwise show sanitized current display
+          const displayValue = bill.amount === 0 ? '' : sanitizeNumericInput(bill.rawAmountDisplay || String(bill.amount));
           return { ...bill, rawAmountDisplay: displayValue };
         }
         return bill;
@@ -1026,35 +1030,38 @@ useEffect(() => {
           <Card className="shadow-lg hover:shadow-xl transition-shadow duration-300">
             <CardHeader>
               <CardTitle className="flex items-center text-2xl font-headline">
-                <ChartIcon className="mr-2 h-7 w-7 text-primary" />
+                <BarChart3 className="mr-2 h-7 w-7 text-primary" />
                 {t('home.chartCard.title')}
               </CardTitle>
               <CardDescription>{t('home.chartCard.descriptionPeriod', { month: monthOptions.find(m=>m.value === selectedMonth.toString())?.label || '', year: selectedYear.toString() })}</CardDescription>
             </CardHeader>
             <CardContent>
               {expenseChartData.length > 0 ? (
-                <ChartContainer config={expenseChartConfig} className="mx-auto aspect-square h-[250px] sm:h-[300px] w-full">
-                  <PieChart>
-                    <ChartTooltip content={<ChartTooltipContent nameKey="name" hideLabel />} />
-                    <Pie 
-                        data={expenseChartData} 
-                        dataKey="value" 
-                        nameKey="name" 
-                        cx="50%" 
-                        cy="50%" 
-                        outerRadius={80} 
-                        labelLine={false} 
-                        label={({ percent, name }) => {
-                            const percentage = (percent * 100).toFixed(0);
-                            return parseInt(percentage) > 3 ? `${name}: ${percentage}%` : `${percentage}%`; 
-                        }}
-                    >
+                <ChartContainer config={expenseChartConfig} className="mx-auto h-[300px] sm:h-[350px] w-full">
+                  <BarChart
+                    data={expenseChartData}
+                    layout="vertical"
+                    margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                  >
+                    <XAxis type="number" stroke="hsl(var(--foreground))" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `${formatCurrency(value).replace(/\D00$/, '')}`} />
+                    <YAxis 
+                      dataKey="name" 
+                      type="category" 
+                      stroke="hsl(var(--foreground))" 
+                      fontSize={12} 
+                      tickLine={false} 
+                      axisLine={false} 
+                      width={120} 
+                      tick={{ dy: 5 }}
+                    />
+                    <ChartTooltip cursor={{ fill: 'hsl(var(--muted))' }} content={<ChartTooltipContent />} />
+                    <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={Math.min(30, 200 / expenseChartData.length)}>
                       {expenseChartData.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.fill} />
                       ))}
-                    </Pie>
+                    </Bar>
                     <ChartLegend content={<ChartLegendContent nameKey="name" />} />
-                  </PieChart>
+                  </BarChart>
                 </ChartContainer>
               ) : (
                 <p className="text-sm text-muted-foreground text-center py-10">{t('home.chartCard.noData')}</p>
@@ -1073,15 +1080,19 @@ useEffect(() => {
             <CardContent>
               {incomeContributionChartData.length > 0 ? (
                  <ChartContainer config={incomeContributionChartConfig} className="mx-auto aspect-square h-[250px] sm:h-[300px] w-full">
-                  <PieChart>
-                    <ChartTooltip content={<ChartTooltipContent nameKey="name" hideLabel />} />
-                    <Pie data={incomeContributionChartData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} labelLine={false} label={({ percent }) => `${(percent * 100).toFixed(0)}%`}>
-                      {incomeContributionChartData.map((entry, index) => (
-                        <Cell key={`cell-income-contrib-${index}`} fill={entry.fill} />
-                      ))}
-                    </Pie>
-                    <ChartLegend content={<ChartLegendContent nameKey="name" />} />
-                  </PieChart>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={incomeContributionChartData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                      <XAxis type="number" stroke="hsl(var(--foreground))" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `${formatCurrency(value).replace(/\D00$/, '')}`} />
+                      <YAxis dataKey="name" type="category" stroke="hsl(var(--foreground))" fontSize={12} tickLine={false} axisLine={false} width={120} tick={{ dy: 5 }} />
+                      <ChartTooltip cursor={{ fill: 'hsl(var(--muted))' }} content={<ChartTooltipContent />} />
+                      <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={Math.min(30, 150 / incomeContributionChartData.length)}>
+                        {incomeContributionChartData.map((entry, index) => (
+                          <Cell key={`cell-income-contrib-${index}`} fill={entry.fill} />
+                        ))}
+                      </Bar>
+                      <ChartLegend content={<ChartLegendContent nameKey="name" />} />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </ChartContainer>
               ) : (
                 <p className="text-sm text-muted-foreground text-center py-10">{t('home.incomeContributionChart.noData')}</p>
