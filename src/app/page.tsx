@@ -65,7 +65,7 @@ const generateMonthOptions = (t: (key: string) => string, currentLocale: Locale)
 };
 
 const generateYearOptions = () => {
-  const currentYr = getYear(new Date());
+  const currentYr = getYear(new Date()); // Use current year for range generation, even if selectedYear is null initially
   const years = [];
   for (let i = -5; i <= 1; i++) {
     years.push({ value: (currentYr + i).toString(), label: (currentYr + i).toString() });
@@ -84,8 +84,8 @@ export default function HomePage() {
   
   const [isClient, setIsClient] = useState(false);
   
-  const [selectedYear, setSelectedYear] = useState<number>(getYear(new Date()));
-  const [selectedMonth, setSelectedMonth] = useState<number>(getMonth(new Date()) + 1);
+  const [selectedYear, setSelectedYear] = useState<number | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
 
   const [currentMonthlyData, setCurrentMonthlyData] = useState<MonthlyData | null>(null);
   const [isLoadingMonthlyData, setIsLoadingMonthlyData] = useState<boolean>(true);
@@ -118,6 +118,14 @@ export default function HomePage() {
     setIsClient(true);
   }, []);
 
+  // Set initial selectedYear and selectedMonth on client mount
+  useEffect(() => {
+    if (isClient) {
+      setSelectedYear(getYear(new Date()));
+      setSelectedMonth(getMonth(new Date()) + 1);
+    }
+  }, [isClient]);
+
   // Load session and user settings
   useEffect(() => {
     if (!isClient) return;
@@ -134,7 +142,7 @@ export default function HomePage() {
       try {
         const settings = await getUserSettings(currentSession.userId);
         setUserSettings(settings);
-        if (settings?.userLocale && settings.userLocale !== locale) { // Use locale from context directly
+        if (settings?.userLocale && settings.userLocale !== locale) { 
           setLocale(settings.userLocale); 
         }
       } catch (error) {
@@ -146,7 +154,7 @@ export default function HomePage() {
       }
     };
     loadAuthData();
-  }, [isClient, router, toast, setLocale, locale]); // Depends on setLocale and locale from context for sync
+  }, [isClient, router, toast, setLocale, locale]);
 
 
   const yearOptions = useMemo(() => generateYearOptions(), []);
@@ -216,12 +224,12 @@ export default function HomePage() {
 
  // Effect to load or initialize monthly data from MongoDB
 useEffect(() => {
-    if (!isClient || !session?.userId || !userSettings || isLoadingAuth) return;
+    if (!isClient || !session?.userId || !userSettings || isLoadingAuth || selectedYear === null || selectedMonth === null) return;
     setIsLoadingMonthlyData(true);
 
     async function loadData() {
       try {
-        let existingMonthData = await getMonthlyData(session!.userId, selectedYear, selectedMonth);
+        let existingMonthData = await getMonthlyData(session!.userId, selectedYear!, selectedMonth!);
         let finalMonthData: MonthlyData;
 
         if (existingMonthData) {
@@ -273,8 +281,8 @@ useEffect(() => {
           
           finalMonthData = {
             userId: session!.userId,
-            year: selectedYear,
-            month: selectedMonth,
+            year: selectedYear!,
+            month: selectedMonth!,
             incomeSources: initialIncomeSources,
             bills: [], 
           };
@@ -298,7 +306,7 @@ useEffect(() => {
         const fallbackIncomeSources = [{id: `primary-${selectedYear}-${selectedMonth}-${Date.now()}`, name: primaryIncomeName, amount: userSettings.defaultIncome || 0}];
         setCurrentMonthlyData({
             userId: session!.userId,
-            year: selectedYear, month: selectedMonth, 
+            year: selectedYear!, month: selectedMonth!, 
             incomeSources: fallbackIncomeSources, 
             bills: []
         });
@@ -366,10 +374,10 @@ useEffect(() => {
       prevBills.map(bill => {
         if (bill.id === billId) {
           let displayValue = bill.rawAmountDisplay || '';
-          if (bill.amount === 0 && bill.rawAmountDisplay === formatCurrency(0)) { // Check if it's exactly formatted zero
+          if (bill.amount === 0 && bill.rawAmountDisplay === formatCurrency(0)) {
             displayValue = ''; 
           } else {
-            displayValue = sanitizeNumericInput(bill.rawAmountDisplay || String(bill.amount));
+             displayValue = sanitizeNumericInput(bill.rawAmountDisplay || String(bill.amount));
           }
           return { ...bill, rawAmountDisplay: displayValue };
         }
@@ -627,7 +635,7 @@ useEffect(() => {
   };
 
   const handleReplicateBill = useCallback(async (billToReplicate: Bill) => {
-    if (!currentMonthlyData || !session?.userId || !userSettings) {
+    if (!currentMonthlyData || !session?.userId || !userSettings || selectedYear === null || selectedMonth === null) {
         toast({ variant: "destructive", title: "Error", description: "Current month data or user session not loaded." });
         return;
     }
@@ -740,11 +748,11 @@ useEffect(() => {
   }, [incomeContributionChartData]);
 
 
-  if (!isClient || isLoadingAuth || (!isLoadingMonthlyData && !currentMonthlyData && session)) {
+  if (!isClient || isLoadingAuth || selectedYear === null || selectedMonth === null || (!isLoadingMonthlyData && !currentMonthlyData && session)) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[calc(100vh-var(--header-height,56px))] p-4 sm:p-8 bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
-        <p className="mt-4 text-lg text-foreground">{isLoadingAuth ? t('app.loadingAuth') : t('app.loadingData')}</p>
+        <p className="mt-4 text-lg text-foreground">{isLoadingAuth || selectedYear === null || selectedMonth === null ? t('app.loadingAuth') : t('app.loadingData')}</p>
       </div>
     );
   }
@@ -859,7 +867,7 @@ useEffect(() => {
                   key={bill.id} 
                   className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 border-b last:border-b-0 hover:bg-muted/50 transition-colors rounded-md"
                 >
-                  <div className="flex items-center gap-3 mr-auto mb-2 sm:mb-0 sm:order-1">
+                  <div className="flex items-center gap-3 mr-auto sm:order-1 mb-2 sm:mb-0">
                     <bill.icon className="h-7 w-7 text-accent flex-shrink-0"/>
                     <p className="font-medium truncate text-card-foreground flex-1">{bill.name}</p>
                   </div>
