@@ -5,6 +5,7 @@ import { siteConfig } from '@/config/site';
 import { Toaster } from "@/components/ui/toaster";
 import { SiteHeader } from '@/components/site-header';
 import { LocalizationProvider } from '@/contexts/localization-context';
+import ErrorBoundary from '@/components/error-boundary'; // Importar o ErrorBoundary
 
 export const metadata: Metadata = {
   title: {
@@ -30,13 +31,15 @@ export default function RootLayout({
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
       </head>
       <body className="font-body antialiased min-h-screen bg-background text-foreground flex flex-col">
-        <LocalizationProvider>
-          <SiteHeader />
-          <main className="flex-1">
-            {children}
-          </main>
-          <Toaster />
-        </LocalizationProvider>
+        <ErrorBoundary>
+          <LocalizationProvider>
+            <SiteHeader />
+            <main className="flex-1">
+              {children}
+            </main>
+            <Toaster />
+          </LocalizationProvider>
+        </ErrorBoundary>
       </body>
     </html>
   );
