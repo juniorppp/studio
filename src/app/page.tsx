@@ -118,13 +118,24 @@ export default function HomePage() {
 
   const sanitizeNumericInput = useCallback((value: string) => {
     const decimalSeparator = getDecimalSeparator();
+    // Allow only digits and the specific decimal separator.
+    // If the value is just the decimal separator, keep it.
+    if (value === decimalSeparator) return value;
+
     const regex = new RegExp(`[^0-9${decimalSeparator === '.' ? '\\.' : decimalSeparator}]`, 'g');
     let sanitized = value.replace(regex, '');
   
+    // Ensure only one decimal separator exists
     const parts = sanitized.split(decimalSeparator);
     if (parts.length > 2) {
       sanitized = parts[0] + decimalSeparator + parts.slice(1).join('');
     }
+    // Prevent leading multiple zeros unless it's "0" or "0," or "0."
+    if (sanitized.startsWith('0') && sanitized.length > 1 && sanitized[1] !== decimalSeparator) {
+        sanitized = sanitized.substring(1);
+    }
+
+
     return sanitized;
   }, [getDecimalSeparator]);
   
@@ -136,6 +147,7 @@ export default function HomePage() {
         amount: storedBill.amount || 0,
         isCustom: storedBill.isCustom,
         incomeSourceId: storedBill.incomeSourceId,
+        rawAmountDisplay: formatCurrency(storedBill.amount || 0) // Initialize rawAmountDisplay
       };
       if (storedBill.isCustom) {
         return {
@@ -161,7 +173,7 @@ export default function HomePage() {
       };
     }).filter(bill => bill !== null) as Bill[];
     return Array.from(new Map(mapped.map(item => [item.id, item])).values());
-  }, [t]);
+  }, [t, formatCurrency]);
 
 
   // Load user settings from localStorage
@@ -302,7 +314,7 @@ useEffect(() => {
           const dataToSave: MonthlyData = {
             ...currentMonthlyData,
             incomeSources: incomeSources, 
-            bills: billsToStoredBillsArray(bills), 
+            bills: billsToStoredBillsArray(bills.map(b => ({...b, amount: b.amount || 0}))), // Ensure amount is number
           };
           const saved = await saveMonthlyData(dataToSave);
           setCurrentMonthlyData(saved); 
@@ -333,28 +345,54 @@ useEffect(() => {
 
   const handleBillAmountRawChange = (billId: string, rawValue: string) => {
     const sanitizedValue = sanitizeNumericInput(rawValue);
+    let numericValue = 0;
+    let formattedDisplay = '';
+  
+    if (sanitizedValue === '' && rawValue === '') { // User cleared input
+      numericValue = 0;
+      formattedDisplay = '';
+    } else if (sanitizedValue) {
+      // If sanitized is just the separator, or "0" + separator, keep it as is for display
+      // This allows typing "0." or "0," or just "."
+      if (sanitizedValue === getDecimalSeparator() || (sanitizedValue.startsWith('0') && sanitizedValue.length === 2 && sanitizedValue[1] === getDecimalSeparator())) {
+        numericValue = 0; // Or parse based on "0." later if needed.
+        formattedDisplay = sanitizedValue;
+      } else {
+        const parsableString = sanitizedValue.replace(getDecimalSeparator(), '.');
+        const parsed = parseFloat(parsableString);
+        if (!isNaN(parsed)) {
+          numericValue = parsed;
+          formattedDisplay = formatCurrency(numericValue);
+        } else {
+          // Could not parse (e.g. "1.2.3" after sanitization "1.23" -> parsed 1.23)
+          // This case might be rare if sanitizeNumericInput is robust
+          numericValue = 0; // Fallback
+          formattedDisplay = sanitizedValue; // Show what user typed if it's partially valid
+        }
+      }
+    } else {
+       // rawValue was something like "abc", sanitized is ""
+       numericValue = 0;
+       formattedDisplay = '';
+    }
+  
     setBills(prevBills =>
       prevBills.map(bill =>
-        bill.id === billId ? { ...bill, rawAmountDisplay: sanitizedValue } : bill
+        bill.id === billId ? { ...bill, amount: numericValue, rawAmountDisplay: formattedDisplay } : bill
       )
     );
   };
-
+  
   const handleBillAmountBlur = (billId: string) => {
     setBills(prevBills => {
-      const billToUpdate = prevBills.find(b => b.id === billId);
-      if (!billToUpdate) return prevBills;
-  
-      const numericValue = parseCurrency(billToUpdate.rawAmountDisplay || '0');
-      
-      const updatedBills = prevBills.map(bill => {
+      return prevBills.map(bill => {
         if (bill.id === billId) {
-          const { rawAmountDisplay, ...rest } = bill; 
-          return { ...rest, amount: numericValue };
+          // Ensure amount is a number, default to 0 if not properly parsed before
+          const currentAmount = typeof bill.amount === 'number' ? bill.amount : 0;
+          return { ...bill, amount: currentAmount, rawAmountDisplay: formatCurrency(currentAmount) };
         }
         return bill;
       });
-      return updatedBills;
     });
   };
   
@@ -491,6 +529,7 @@ useEffect(() => {
       amount: parsedAmount,
       isCustom: newBillIsCustom || !newBillPredefinedId,
       incomeSourceId: selectedIncomeSourceForNewBill === "unassigned" ? undefined : selectedIncomeSourceForNewBill,
+      rawAmountDisplay: formatCurrency(parsedAmount), // Initialize with formatted amount
     };
 
     const billExists = bills.some(b => b.id === newBillEntry.id && !b.isCustom && !newBillEntry.isCustom);
@@ -630,7 +669,7 @@ useEffect(() => {
         console.error("Error replicating bill:", error);
         toast({ variant: "destructive", title: t('toast.errorReplicatingBill.title'), description: (error as Error).message });
     }
-}, [selectedYear, selectedMonth, userSettings, t, locale, toast, currentMonthlyData]); 
+  }, [selectedYear, selectedMonth, userSettings, t, locale, toast, currentMonthlyData]); 
   
 
   const topExpenses = useMemo(() => {
@@ -813,13 +852,13 @@ useEffect(() => {
                   className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 border-b last:border-b-0 hover:bg-muted/50 transition-colors rounded-md"
                 >
                   {/* Icon and Name group */}
-                  <div className="flex items-center gap-3 mr-auto"> {/* mr-auto pushes controls group if on same line (desktop) or to next line (mobile) */}
+                  <div className="flex items-center gap-3 mr-auto mb-2 sm:mb-0 sm:order-1">
                     <bill.icon className="h-7 w-7 text-accent flex-shrink-0"/>
                     <p className="font-medium truncate text-card-foreground flex-1">{bill.name}</p>
                   </div>
 
                   {/* Controls Group: Payer Select, Amount, Buttons */}
-                  <div className="flex flex-row flex-wrap items-center justify-end gap-2 w-full sm:w-auto mt-2 sm:mt-0">
+                  <div className="flex flex-row flex-wrap items-center justify-end gap-2 w-full sm:w-auto mt-2 sm:mt-0 sm:order-2">
                     {/* Income Source Select Div */}
                     <div className="min-w-[140px] flex-auto xs:flex-initial xs:w-auto sm:max-w-[170px] md:max-w-[190px]">
                       <Select
@@ -847,7 +886,7 @@ useEffect(() => {
                       <Input
                         id={`bill-amount-${bill.id}`}
                         type="text" 
-                        value={(bill as any).rawAmountDisplay ?? (bill.amount === 0 && !(bill as any).rawAmountDisplay?.trim() ? '' : formatCurrency(bill.amount))}
+                        value={(bill.rawAmountDisplay !== undefined ? bill.rawAmountDisplay : formatCurrency(bill.amount))}
                         onChange={(e) => handleBillAmountRawChange(bill.id, e.target.value)}
                         onBlur={() => handleBillAmountBlur(bill.id)}
                         placeholder={t('home.addBillModal.amountPlaceholder')}
