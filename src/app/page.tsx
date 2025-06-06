@@ -1059,19 +1059,16 @@ useEffect(() => {
                     <BarChart
                       data={expenseChartData}
                       layout="vertical"
-                      margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                      margin={{ top: 5, right: 30, left: 5, bottom: 5 }} // Reduced left margin
                     >
                       <XAxis type="number" stroke="hsl(var(--foreground))" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `${formatCurrency(value).replace(/\D00$/, '')}`} />
                       <YAxis 
                         dataKey="name" 
                         type="category" 
-                        stroke="hsl(var(--foreground))" 
-                        fontSize={12} 
-                        tickLine={false} 
-                        axisLine={false} 
-                        width={120} 
-                        tick={{ dy: 5 }}
-                        interval={0}
+                        tick={false} // Hide Y-axis labels
+                        axisLine={false} // Hide Y-axis line
+                        tickLine={false}
+                        // width={0} // Minimize width as labels are hidden
                       />
                       <ChartTooltip cursor={{ fill: 'hsl(var(--muted))' }} content={<ChartTooltipContent />} />
                       <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={Math.min(30, 200 / expenseChartData.length) || 15}>
