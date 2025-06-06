@@ -1,5 +1,4 @@
 
-'use server';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { JWT_SECRET } from '@/lib/config';
