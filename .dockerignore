@@ -1,40 +1,24 @@
-# Git files
-.git
-.gitignore
-
-# Node modules
+# Ignorar node_modules, exceto aqueles dentro de .next/standalone (que já são filtrados)
 node_modules
-
-# Next.js build outputs (local)
-.next
-
-# OS-specific files
-.DS_Store
-Thumbs.db
-
-# Log files
+# Ignorar logs do npm
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-pnpm-debug.log*
-
-# Environment files (should be managed on the server, not in the image)
+# Ignorar diretório .next do build local (o build do Docker fará o seu próprio)
+.next
+# Ignorar arquivos de configuração de IDEs
+.vscode
+.idea
+*.sublime-project
+*.sublime-workspace
+# Ignorar arquivos de sistema operacional
+.DS_Store
+Thumbs.db
+# Ignorar arquivos .env (variáveis de ambiente devem ser passadas em runtime)
 .env
 .env*.local
-.env.development
-.env.production
-*.env
-
-# VSCode specific
-.vscode
-
-# IDE specific
-.idea
-
-# Temporary files
-*.tmp
-*.bak
-*.swp
-
-# Package archives
-*.tgz
+# Arquivos de build do Docker (se estiverem no mesmo diretório)
+Dockerfile
+docker-compose.yml
+# Arquivos específicos do Firebase App Hosting
+apphosting.yaml

@@ -1,61 +1,48 @@
-# Stage 1: Install dependencies
-FROM node:20-alpine AS deps
-# Install libc6-compat for systems that need it (e.g., for some native Node modules)
-RUN apk add --no-cache libc6-compat
-WORKDIR /app
+# Dockerfile
 
-# Copy package manager files and install dependencies
-COPY package.json yarn.lock* package-lock.json* pnpm-lock.yaml* ./
-RUN \
-  if [ -f yarn.lock ]; then yarn --frozen-lockfile; \
-  elif [ -f package-lock.json ]; then npm ci; \
-  elif [ -f pnpm-lock.yaml ]; then yarn global add pnpm && pnpm i --frozen-lockfile; \
-  else echo "Lockfile not found." && exit 1; \
-  fi
-
-# Stage 2: Build the application
+# Stage 1: Build the Next.js application
 FROM node:20-alpine AS builder
 WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
+
+# Definir ARG para NODE_ENV para que seja usado durante npm install se necessário
+ARG NODE_ENV=development
+ENV NODE_ENV=${NODE_ENV}
+
+# Copiar package.json e package-lock.json (ou yarn.lock, pnpm-lock.yaml)
+COPY package.json package-lock.json* ./
+
+# Instalar dependências.
+# Para builds de produção, `npm ci` é geralmente preferido se package-lock.json está atualizado.
+# Se o build precisa de devDependencies (como o `next` para `next build`), instale todas.
+RUN npm install
+
+# Copiar o restante do código fonte da aplicação
 COPY . .
 
-# Disable Next.js telemetry during build if desired
-# ENV NEXT_TELEMETRY_DISABLED 1
+# Construir a aplicação Next.js
+# A opção `output: 'standalone'` no next.config.js garante
+# que um servidor mínimo seja construído no diretório .next/standalone
+RUN npm run build
 
-RUN \
-  if [ -f yarn.lock ]; then yarn run build; \
-  elif [ -f package-lock.json ]; then npm run build; \
-  elif [ -f pnpm-lock.yaml ]; then pnpm run build; \
-  else echo "Lockfile not found." && exit 1; \
-  fi
-
-# Stage 3: Production image
+# Stage 2: Production image (Runner)
 FROM node:20-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV production
-# Disable Next.js telemetry during runtime if desired
-# ENV NEXT_TELEMETRY_DISABLED 1
+# O servidor Next.js no modo standalone escuta na porta 3000 por padrão.
+# Você pode sobrescrever isso com a variável de ambiente PORT.
+# ENV PORT 3000
 
-# Create a non-root user for security
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
+# Copiar a saída standalone do estágio builder
+# Isso inclui server.js, .next/static, public, e node_modules mínimos
+COPY --from=builder /app/.next/standalone ./
 
-# Copy necessary files from the builder stage
-COPY --from=builder /app/public ./public
-
-# Copy standalone output and static assets
-# Ensure correct ownership for the nextjs user
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-
-# Set the user for running the application
-USER nextjs
-
+# Expor a porta em que a aplicação roda
 EXPOSE 3000
 
-ENV PORT 3000
-ENV HOSTNAME "0.0.0.0" # Listen on all interfaces
+# Opcional: Desabilitar telemetria do Next.js
+ENV NEXT_TELEMETRY_DISABLED 1
 
-# The standalone output creates a server.js file to run the app
+# Comando para rodar a aplicação
+# O arquivo server.js é criado pela saída standalone
 CMD ["node", "server.js"]
