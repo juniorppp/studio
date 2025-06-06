@@ -1,13 +1,13 @@
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { AUTH_COOKIE_NAME } from '@/lib/config';
-import { verifyUserToken } from '@/lib/authUtils'; // Assuming this can run in middleware edge runtime
+import { verifyUserToken } from '@/lib/authUtils'; 
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const token = request.cookies.get(AUTH_COOKIE_NAME)?.value;
 
-  const publicPaths = ['/login', '/register', '/api/auth/login', '/api/auth/register']; // API routes for auth are public
+  const publicPaths = ['/login', '/register', '/api/auth/login', '/api/auth/register']; 
 
   // Allow access to public paths
   if (publicPaths.some(path => pathname.startsWith(path))) {
@@ -20,24 +20,17 @@ export async function middleware(request: NextRequest) {
   }
 
 
-  let session = null;
+  let session: UserJWTPayload | null = null;
   if (token) {
-    // verifyUserToken might use 'jsonwebtoken' which may not be edge compatible.
-    // For middleware, a simpler check or a different JWT library might be needed if issues arise.
-    // Or, protect pages within the page components themselves using a server action.
-    // For now, let's assume verifyUserToken is simple enough or use a placeholder.
     try {
-        session = verifyUserToken(token); // This might be problematic in Edge runtime
+        session = await verifyUserToken(token); // Now async
     } catch (e) {
         console.error("Token verification error in middleware", e);
-        // If token verification fails, treat as no session
     }
   }
 
 
   if (!session) {
-    // If no session and trying to access a protected route, redirect to login
-    // Preserve search params for redirection after login, e.g., ?next=/dashboard
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     url.searchParams.set('next', pathname);
