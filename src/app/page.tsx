@@ -15,8 +15,8 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { BarChart3, Droplet, Zap, Wifi, Home, DollarSign, LineChart, AlertCircle, Loader2, Brain, Receipt, PlusCircle, CalendarDays, Edit3, Trash2, Landmark, ArrowRightCircle } from 'lucide-react';
-import { Bar, BarChart, Cell, ResponsiveContainer, XAxis, YAxis } from 'recharts';
+import { BarChart3, Droplet, Zap, Wifi, Home, DollarSign, LineChart, AlertCircle, Loader2, Brain, Receipt, PlusCircle, CalendarDays, Edit3, Trash2, Landmark, ArrowRightCircle, PieChartIcon } from 'lucide-react';
+import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, XAxis, YAxis } from 'recharts';
 import { ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent, ChartLegend, ChartLegendContent } from "@/components/ui/chart";
 import type { Bill, BillConfig, StoredBillData, MonthlyData, Locale, IncomeSource, UserJWTPayload, UserSettings } from '@/types';
 import { getSpendingInsights } from '@/ai/flows/spending-insights';
@@ -65,7 +65,7 @@ const generateMonthOptions = (t: (key: string) => string, currentLocale: Locale)
 };
 
 const generateYearOptions = () => {
-  const currentYr = getYear(new Date()); // Use current year for range generation, even if selectedYear is null initially
+  const currentYr = getYear(new Date());
   const years = [];
   for (let i = -5; i <= 1; i++) {
     years.push({ value: (currentYr + i).toString(), label: (currentYr + i).toString() });
@@ -166,26 +166,20 @@ export default function HomePage() {
     const decimalSeparator = getDecimalSeparator();
     if (value === decimalSeparator) return value; 
 
-    // Regex to keep only digits and the locale-specific decimal separator
     const regex = new RegExp(`[^0-9${decimalSeparator === '.' ? '\\.' : decimalSeparator}]`, 'g');
     let sanitized = value.replace(regex, '');
   
-    // Ensure only one decimal separator
     const parts = sanitized.split(decimalSeparator);
     if (parts.length > 2) {
       sanitized = parts[0] + decimalSeparator + parts.slice(1).join('');
     }
 
-    // Remove leading zeros unless it's the only digit or followed by a separator
-    // e.g., "007" -> "7", "00.5" -> "0.5"
      if (sanitized.length > 1 && sanitized.startsWith('0') && sanitized[1] !== decimalSeparator) {
         sanitized = sanitized.substring(1);
-        // Loop to remove multiple leading zeros if user pastes "00007"
         while (sanitized.length > 1 && sanitized.startsWith('0') && sanitized[1] !== decimalSeparator) {
             sanitized = sanitized.substring(1);
         }
     }
-    // If input is "00" or "000", reduce to "0"
     if (/^0+$/.test(sanitized) && sanitized.length > 1) {
         sanitized = "0";
     }
@@ -197,12 +191,13 @@ export default function HomePage() {
   const mapStoredDataToBills = useCallback((storedBills: StoredBillData[]): Bill[] => {
     const mapped = storedBills.map(storedBill => {
       const amount = storedBill.amount || 0;
+      const rawDisplay = formatCurrency(amount); 
       const baseBill = {
         id: storedBill.id,
         amount: amount,
         isCustom: storedBill.isCustom,
         incomeSourceId: storedBill.incomeSourceId,
-        rawAmountDisplay: formatCurrency(amount) 
+        rawAmountDisplay: rawDisplay
       };
       if (storedBill.isCustom) {
         return {
@@ -325,7 +320,7 @@ useEffect(() => {
       }
     }
     loadData();
-  }, [isClient, session, userSettings, selectedYear, selectedMonth, t, mapStoredDataToBills, toast, isLoadingAuth]);
+  }, [isClient, session, userSettings, selectedYear, selectedMonth, t, mapStoredDataToBills, toast, isLoadingAuth, locale, setLocale]);
 
 
   // Debounced save to MongoDB
@@ -381,8 +376,9 @@ useEffect(() => {
     setBills(prevBills =>
       prevBills.map(bill => {
         if (bill.id === billId) {
-          // If amount is 0, show empty string for easier typing, otherwise show sanitized current display
-          const displayValue = bill.amount === 0 ? '' : sanitizeNumericInput(bill.rawAmountDisplay || String(bill.amount));
+          const displayValue = bill.amount === 0 && (!bill.rawAmountDisplay || bill.rawAmountDisplay === formatCurrency(0))
+            ? ''
+            : sanitizeNumericInput(bill.rawAmountDisplay || String(bill.amount));
           return { ...bill, rawAmountDisplay: displayValue };
         }
         return bill;
@@ -501,7 +497,18 @@ useEffect(() => {
   };
 
   const handleAddNewBillAmountRawChange = (rawValue: string) => {
-    setNewBillAmountRaw(sanitizeNumericInput(rawValue));
+    const sanitized = sanitizeNumericInput(rawValue);
+    setNewBillAmountRaw(sanitized); 
+  };
+
+  const handleAddNewBillAmountFocus = () => {
+    const currentVal = newBillAmountRaw;
+    const parsed = parseCurrency(currentVal);
+    if (parsed === 0 && currentVal === formatCurrency(0)) {
+        setNewBillAmountRaw('');
+    } else {
+        setNewBillAmountRaw(sanitizeNumericInput(currentVal));
+    }
   };
 
   const handleAddNewBillAmountBlur = () => {
@@ -585,6 +592,16 @@ useEffect(() => {
 
   const handleIncomeSourceAmountRawChange = (rawValue: string) => {
     setIncomeSourceAmountRaw(sanitizeNumericInput(rawValue));
+  };
+  
+  const handleIncomeSourceAmountFocus = () => {
+    const currentVal = incomeSourceAmountRaw;
+    const parsed = parseCurrency(currentVal);
+    if (parsed === 0 && currentVal === formatCurrency(0)) {
+        setIncomeSourceAmountRaw('');
+    } else {
+        setIncomeSourceAmountRaw(sanitizeNumericInput(currentVal));
+    }
   };
   
   const handleIncomeSourceAmountBlur = () => {
@@ -771,7 +788,7 @@ useEffect(() => {
         <div className="mt-6 flex flex-col sm:flex-row justify-center items-center gap-4">
           <div className="flex gap-2 items-center">
             <CalendarDays className="h-5 w-5 text-muted-foreground" />
-            <Select value={selectedMonth.toString()} onValueChange={(value) => setSelectedMonth(parseInt(value))}>
+            <Select value={selectedMonth !== null ? selectedMonth.toString() : undefined} onValueChange={(value) => setSelectedMonth(parseInt(value))}>
               <SelectTrigger className="w-[150px]">
                 <SelectValue placeholder={t('home.monthYearSelector.monthPlaceholder')} />
               </SelectTrigger>
@@ -781,7 +798,7 @@ useEffect(() => {
                 ))}
               </SelectContent>
             </Select>
-            <Select value={selectedYear.toString()} onValueChange={(value) => setSelectedYear(parseInt(value))}>
+            <Select value={selectedYear !== null ? selectedYear.toString() : undefined} onValueChange={(value) => setSelectedYear(parseInt(value))}>
               <SelectTrigger className="w-[100px]">
                 <SelectValue placeholder={t('home.monthYearSelector.yearPlaceholder')} />
               </SelectTrigger>
@@ -804,7 +821,7 @@ useEffect(() => {
                 <Landmark className="mr-2 h-7 w-7 text-primary" />
                 {t('home.incomeSourcesCard.title')}
               </CardTitle>
-              <CardDescription>{t('home.incomeSourcesCard.descriptionPeriod', { month: monthOptions.find(m=>m.value === selectedMonth.toString())?.label || '', year: selectedYear.toString() })}</CardDescription>
+              <CardDescription>{t('home.incomeSourcesCard.descriptionPeriod', { month: monthOptions.find(m=>m.value === (selectedMonth !== null ? selectedMonth.toString() : ''))?.label || '', year: selectedYear !== null ? selectedYear.toString() : '' })}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               {incomeSources.length === 0 && (
@@ -860,7 +877,7 @@ useEffect(() => {
                 <LineChart className="mr-2 h-7 w-7 text-primary" />
                 {t('home.billsCard.title')}
               </CardTitle>
-              <CardDescription>{t('home.billsCard.descriptionPeriod', { month: monthOptions.find(m=>m.value === selectedMonth.toString())?.label || '', year: selectedYear.toString() })}</CardDescription>
+              <CardDescription>{t('home.billsCard.descriptionPeriod', { month: monthOptions.find(m=>m.value === (selectedMonth !== null ? selectedMonth.toString() : ''))?.label || '', year: selectedYear !== null ? selectedYear.toString() : '' })}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-1">
               {bills.length === 0 && (
@@ -980,7 +997,7 @@ useEffect(() => {
           <Card className="shadow-lg hover:shadow-xl transition-shadow duration-300">
             <CardHeader>
               <CardTitle className="text-2xl font-headline">{t('home.summaryCard.title')}</CardTitle>
-              <CardDescription>{t('home.summaryCard.descriptionPeriod', { month: monthOptions.find(m=>m.value === selectedMonth.toString())?.label || '', year: selectedYear.toString() })}</CardDescription>
+              <CardDescription>{t('home.summaryCard.descriptionPeriod', { month: monthOptions.find(m=>m.value === (selectedMonth !== null ? selectedMonth.toString() : ''))?.label || '', year: selectedYear !== null ? selectedYear.toString() : '' })}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex justify-between items-center">
@@ -1033,35 +1050,38 @@ useEffect(() => {
                 <BarChart3 className="mr-2 h-7 w-7 text-primary" />
                 {t('home.chartCard.title')}
               </CardTitle>
-              <CardDescription>{t('home.chartCard.descriptionPeriod', { month: monthOptions.find(m=>m.value === selectedMonth.toString())?.label || '', year: selectedYear.toString() })}</CardDescription>
+              <CardDescription>{t('home.chartCard.descriptionPeriod', { month: monthOptions.find(m=>m.value === (selectedMonth !== null ? selectedMonth.toString() : ''))?.label || '', year: selectedYear !== null ? selectedYear.toString() : '' })}</CardDescription>
             </CardHeader>
             <CardContent>
               {expenseChartData.length > 0 ? (
                 <ChartContainer config={expenseChartConfig} className="mx-auto h-[300px] sm:h-[350px] w-full">
-                  <BarChart
-                    data={expenseChartData}
-                    layout="vertical"
-                    margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                  >
-                    <XAxis type="number" stroke="hsl(var(--foreground))" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `${formatCurrency(value).replace(/\D00$/, '')}`} />
-                    <YAxis 
-                      dataKey="name" 
-                      type="category" 
-                      stroke="hsl(var(--foreground))" 
-                      fontSize={12} 
-                      tickLine={false} 
-                      axisLine={false} 
-                      width={120} 
-                      tick={{ dy: 5 }}
-                    />
-                    <ChartTooltip cursor={{ fill: 'hsl(var(--muted))' }} content={<ChartTooltipContent />} />
-                    <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={Math.min(30, 200 / expenseChartData.length)}>
-                      {expenseChartData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.fill} />
-                      ))}
-                    </Bar>
-                    <ChartLegend content={<ChartLegendContent nameKey="name" />} />
-                  </BarChart>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={expenseChartData}
+                      layout="vertical"
+                      margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                    >
+                      <XAxis type="number" stroke="hsl(var(--foreground))" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `${formatCurrency(value).replace(/\D00$/, '')}`} />
+                      <YAxis 
+                        dataKey="name" 
+                        type="category" 
+                        stroke="hsl(var(--foreground))" 
+                        fontSize={12} 
+                        tickLine={false} 
+                        axisLine={false} 
+                        width={120} 
+                        tick={{ dy: 5 }}
+                        interval={0}
+                      />
+                      <ChartTooltip cursor={{ fill: 'hsl(var(--muted))' }} content={<ChartTooltipContent />} />
+                      <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={Math.min(30, 200 / expenseChartData.length) || 15}>
+                        {expenseChartData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.fill} />
+                        ))}
+                      </Bar>
+                      <ChartLegend content={<ChartLegendContent nameKey="name" />} />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </ChartContainer>
               ) : (
                 <p className="text-sm text-muted-foreground text-center py-10">{t('home.chartCard.noData')}</p>
@@ -1072,27 +1092,36 @@ useEffect(() => {
           <Card className="shadow-lg hover:shadow-xl transition-shadow duration-300">
             <CardHeader>
               <CardTitle className="flex items-center text-2xl font-headline">
-                <DollarSign className="mr-2 h-7 w-7 text-primary" />
+                <PieChartIcon className="mr-2 h-7 w-7 text-primary" />
                 {t('home.incomeContributionChart.title')}
               </CardTitle>
-              <CardDescription>{t('home.incomeContributionChart.descriptionPeriod', { month: monthOptions.find(m=>m.value === selectedMonth.toString())?.label || '', year: selectedYear.toString() })}</CardDescription>
+              <CardDescription>{t('home.incomeContributionChart.descriptionPeriod', { month: monthOptions.find(m=>m.value === (selectedMonth !== null ? selectedMonth.toString() : ''))?.label || '', year: selectedYear !== null ? selectedYear.toString() : '' })}</CardDescription>
             </CardHeader>
             <CardContent>
               {incomeContributionChartData.length > 0 ? (
                  <ChartContainer config={incomeContributionChartConfig} className="mx-auto aspect-square h-[250px] sm:h-[300px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={incomeContributionChartData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                      <XAxis type="number" stroke="hsl(var(--foreground))" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `${formatCurrency(value).replace(/\D00$/, '')}`} />
-                      <YAxis dataKey="name" type="category" stroke="hsl(var(--foreground))" fontSize={12} tickLine={false} axisLine={false} width={120} tick={{ dy: 5 }} />
-                      <ChartTooltip cursor={{ fill: 'hsl(var(--muted))' }} content={<ChartTooltipContent />} />
-                      <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={Math.min(30, 150 / incomeContributionChartData.length)}>
-                        {incomeContributionChartData.map((entry, index) => (
-                          <Cell key={`cell-income-contrib-${index}`} fill={entry.fill} />
-                        ))}
-                      </Bar>
-                      <ChartLegend content={<ChartLegendContent nameKey="name" />} />
-                    </BarChart>
-                  </ResponsiveContainer>
+                    <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                            <ChartTooltip content={<ChartTooltipContent hideLabel nameKey="name" />} />
+                            <Pie data={incomeContributionChartData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} labelLine={false} label={({ cx, cy, midAngle, innerRadius, outerRadius, percent, index }) => {
+                                const RADIAN = Math.PI / 180;
+                                const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+                                const x = cx + radius * Math.cos(-midAngle * RADIAN);
+                                const y = cy + radius * Math.sin(-midAngle * RADIAN);
+                                return (
+                                    <text x={x} y={y} fill="white" textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central" fontSize="10px">
+                                    {`${(percent * 100).toFixed(0)}%`}
+                                    </text>
+                                );
+                                }}
+                            >
+                                {incomeContributionChartData.map((entry, index) => (
+                                <Cell key={`cell-income-contrib-${index}`} fill={entry.fill} />
+                                ))}
+                            </Pie>
+                            <ChartLegend content={<ChartLegendContent nameKey="name" />} />
+                        </PieChart>
+                    </ResponsiveContainer>
                 </ChartContainer>
               ) : (
                 <p className="text-sm text-muted-foreground text-center py-10">{t('home.incomeContributionChart.noData')}</p>
@@ -1196,6 +1225,7 @@ useEffect(() => {
                 type="text" 
                 value={newBillAmountRaw}
                 onChange={(e) => handleAddNewBillAmountRawChange(e.target.value)}
+                onFocus={handleAddNewBillAmountFocus}
                 onBlur={handleAddNewBillAmountBlur} 
                 placeholder={t('home.addBillModal.amountPlaceholder')}
               />
@@ -1248,6 +1278,7 @@ useEffect(() => {
                 type="text" 
                 value={incomeSourceAmountRaw}
                 onChange={(e) => handleIncomeSourceAmountRawChange(e.target.value)}
+                onFocus={handleIncomeSourceAmountFocus}
                 onBlur={handleIncomeSourceAmountBlur} 
                 placeholder={t('home.addBillModal.amountPlaceholder')}
               />
@@ -1271,5 +1302,3 @@ useEffect(() => {
     </div>
   );
 }
-
-    
